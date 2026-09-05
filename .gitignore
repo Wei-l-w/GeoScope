@@ -1,0 +1,23 @@
+# ---- Python ----
+__pycache__/
+*.pyc
+.venv/
+
+# ---- 数据（真实数据一律不入库）----
+data/raw/
+data/*.duckdb
+data/*.duckdb.wal
+*.csv
+*.jsonl
+*.parquet
+
+# ---- 密钥 ----
+.streamlit/secrets.toml
+.env
+
+# ---- 本地调试产物 ----
+.playwright-cli/
+.cursor/
+tmp_*.png
+screenshot.png
+*.log
