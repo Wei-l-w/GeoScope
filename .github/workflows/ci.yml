@@ -32,4 +32,4 @@ jobs:
           python -m ingest.load news       data/raw/news_sample.jsonl
 
       - name: Run offline tests (no LLM required)
-        run: pytest tests/ -q
+        run: python -m pytest tests/ -q
