@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 8501
 
-CMD ["streamlit", "run", "app/Home.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+CMD ["streamlit", "run", "app/GeoAgent.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]

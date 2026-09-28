@@ -21,3 +21,11 @@ data/*.duckdb.wal
 tmp_*.png
 screenshot.png
 *.log
+
+# ---- Agent 输出 ----
+data/agent_output/
+data/rag_index.pkl
+
+# ---- WorkBuddy 工作区 ----
+.workbuddy/
+demos/

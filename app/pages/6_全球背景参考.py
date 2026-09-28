@@ -10,9 +10,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ui
 from db import query
 
-ui.setup("GDELT 背景事件", accent="#fbbf24")
+ui.setup("全球背景参考", accent="#fbbf24")
 ui.page_header(
-    "GDELT 全球背景事件",
+    "全球背景参考（GDELT 媒体事件流）",
     "航运相关国家的媒体事件流（估值任务筛选版，非红海专题数据）· 默认聚焦 2023 下半年危机窗口",
     chips=["全球背景参考", "1920 ~ 2025"],
 )

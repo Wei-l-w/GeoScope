@@ -6,7 +6,7 @@ import plotly.express as px
 import pydeck as pdk
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ui
 from db import query
 
@@ -16,6 +16,20 @@ ui.page_header(
     "2023 下半年红海危机专题 —— AIS 船舶动态 · ACLED 危机事件（LLM 筛选增强）· 新闻原文 · GDELT 全球背景",
     chips=[("DATA ONLINE", "live"), "专题窗口 2023-07 ~ 2023-12"],
 )
+
+with st.expander("页面导航：我该用哪一页？", expanded=False):
+    st.markdown(
+        """
+| 页面 | 什么时候用 |
+| --- | --- |
+| **GeoAgent**（推荐入口） | 直接用大白话提问：查数、缓冲区分析、航迹查询、事件背景问答，结果自动上图 |
+| **AIS船舶地图** | 看具体船舶的航行轨迹与密度分布，按时间窗筛选 |
+| **ACLED事件** | 浏览红海危机事件清单：风险等级 / 咽喉要道 / 伤亡等多维筛选 |
+| **时空叠加** | 把船舶轨迹和危机事件叠在一张图上，观察袭击与航运的时空关联 |
+| **新闻检索** | 按英文关键词全文检索报道原文（对话式问背景请直接用 GeoAgent） |
+| **GDELT事件** | 全球媒体舆情背景（非红海专题数据），用于对比全球冲突基调 |
+"""
+    )
 
 # ---- KPI ----
 stats = {

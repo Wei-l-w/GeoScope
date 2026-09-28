@@ -11,7 +11,7 @@ from db import query
 
 ui.setup("新闻检索", accent="#a78bfa")
 ui.page_header(
-    "新闻文本检索与趋势",
+    "新闻文本检索与趋势（问背景/要结论请用 GeoAgent 页，本页适合按关键词翻原文）",
     "全文关键词检索 · 报道热度时间线 · 来源结构分析",
     chips=["ACLED 原文回填", "568 篇"],
 )
