@@ -2,10 +2,7 @@
 
 > **English**: A spatial-reasoning AI agent built on LangChain. Ask geospatial questions in natural language — it performs intent recognition, task decomposition, Function Calling, Text-to-GeoSQL generation and renders results on an interactive map (GeoJSON / deck.gl), delivering a "what-you-ask-is-what-you-see" experience.
 
-![Python](https://img.shields.io/badge/python-3.12+-blue)
-![CI](https://github.com/Wei-l-w/GeoScope/actions/workflows/ci.yml/badge.svg)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Eval](https://img.shields.io/badge/GeoSQL%20exec%20accuracy-16%2F16-brightgreen)
+![Python](https://img.shields.io/badge/python-3.12+-blue) ![CI](https://github.com/Wei-l-w/GeoScope/actions/workflows/ci.yml/badge.svg) ![License](https://img.shields.io/badge/license-MIT-green) ![Eval](https://img.shields.io/badge/GeoSQL%20exec%20accuracy-16%2F16-brightgreen)
 
 以 **2023 下半年红海危机** 为垂直场景：AIS 船舶动态（3760 万行）· ACLED 冲突事件（LLM 增强标注）· GDELT 全球舆情 · 新闻原文，统一入 DuckDB 空间数据仓库，由 Agent 提供对话式分析入口。
 
@@ -47,13 +44,13 @@ Streamlit + deck.gl：GeoJSON 即时上图，"所问即所得"
 
 ## 能力映射（为什么是这个项目）
 
-| 能力点 | 实现 | 代码位置 |
-| --- | --- | --- |
-| Agent 架构 / 意图识别 / 任务拆解 / Function Calling | LangChain ReAct 主循环，流式事件输出，工具调用熔断 | `agent/react.py` |
-| GIS 工具链封装为 Tools/Plugins | 缓冲区 / 叠置统计 / 地理编码 / 航迹，点面运算全部 SQL 下推（千万行秒级） | `agent/tools.py` |
-| Text-to-SQL / GeoSQL 准确率优化 | schema linking + 检索式 few-shot + 报错自纠正；**16 条执行准确率评测 16/16=100%**（[报告](eval/report.md)） | `agent/geosql.py` `agent/eval.py` |
-| 空间知识库 RAG | 新闻正文切块 + 事件描述 → 3100+ 知识块，余弦 top-k 带引用；嵌入后端抽象可插拔 | `agent/rag.py` |
-| GeoJSON / deck.gl 可视化交互 | 三类几何结果（圆/点/线）即时上图，流式工具调用可视化，多轮指代对话，会话持久化 | `app/GeoAgent.py` |
+| 能力点                                       | 实现                                                                                     | 代码位置                              |
+| ----------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------- |
+| Agent 架构 / 意图识别 / 任务拆解 / Function Calling | LangChain ReAct 主循环，流式事件输出，工具调用熔断                                                      | `agent/react.py`                  |
+| GIS 工具链封装为 Tools/Plugins                  | 缓冲区 / 叠置统计 / 地理编码 / 航迹，点面运算全部 SQL 下推（千万行秒级）                                            | `agent/tools.py`                  |
+| Text-to-SQL / GeoSQL 准确率优化                | schema linking + 检索式 few-shot + 报错自纠正；**16 条执行准确率评测 16/16=100%**（[报告](eval/report.md)） | `agent/geosql.py` `agent/eval.py` |
+| 空间知识库 RAG                                 | 新闻正文切块 + 事件描述 → 3100+ 知识块，余弦 top-k 带引用；嵌入后端抽象可插拔                                       | `agent/rag.py`                    |
+| GeoJSON / deck.gl 可视化交互                   | 三类几何结果（圆/点/线）即时上图，流式工具调用可视化，多轮指代对话，会话持久化                                               | `app/GeoAgent.py`                 |
 
 ## 快速开始
 
@@ -124,13 +121,13 @@ python -m ingest.load news       '<新闻正文抓取结果>.jsonl'
 
 数据源与目标表对应：
 
-| 数据源 | 目标表 | 说明 |
-| --- | --- | --- |
-| ais | ais_positions | 动态位置（~ 分隔无表头） |
-| ais_static | ais_ships | 船舶静态档案，页面按 mmsi 关联 |
-| gdelt | gdelt_events | 标准 GDELT 列 + EventName 增强列 |
-| acled | acled_events | ACLED 官方字段 + 红海危机专题 LLM 标注 |
-| news | news_articles | 原文回填 JSONL，related_event_id 关联事件 |
+| 数据源        | 目标表           | 说明                               |
+| ---------- | ------------- | -------------------------------- |
+| ais        | ais_positions | 动态位置（~ 分隔无表头）                    |
+| ais_static | ais_ships     | 船舶静态档案，页面按 mmsi 关联               |
+| gdelt      | gdelt_events  | 标准 GDELT 列 + EventName 增强列       |
+| acled      | acled_events  | ACLED 官方字段 + 红海危机专题 LLM 标注       |
+| news       | news_articles | 原文回填 JSONL，related_event_id 关联事件 |
 
 ## 测试与 CI
 
