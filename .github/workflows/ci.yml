@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Compile check
+        run: python -m compileall agent ingest app scripts
+
+      - name: Build sample warehouse
+        run: |
+          python scripts/generate_sample_data.py
+          python -m ingest.load ais   data/raw/ais_sample.csv
+          python -m ingest.load gdelt data/raw/gdelt_sample.csv
+          python -m ingest.load acled data/raw/acled_sample.csv
+          python -m ingest.load news  data/raw/news_sample.jsonl
+
+      - name: Run offline tests (no LLM required)
+        run: pytest tests/ -q
