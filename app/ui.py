@@ -367,6 +367,81 @@ body::before {
 }
 hr:not(.gis-rule) { border-color: var(--line) !important; }
 
+/* ================= 对话组件（GeoAgent 页） ================= */
+/* 聊天气泡：接入主题卡片色，避免默认深色字配深底 */
+[data-testid="stChatMessage"] {
+  background: linear-gradient(160deg, var(--card-1), var(--card-2));
+  border: 1px solid var(--line); border-radius: 12px;
+  padding: 6px 14px; margin-bottom: 10px;
+  box-shadow: 0 12px 30px -24px rgba(2,6,23,.45);
+}
+[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] :is(p, li, span, td, th) {
+  color: var(--tx-1);
+}
+[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] :is(h1, h2, h3, h4, strong) {
+  color: var(--tx-hero) !important;
+}
+[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] :is(th, td) {
+  border-color: var(--line);
+}
+[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] a { color: var(--nav-active); }
+[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] code {
+  background: var(--chip-bg2); color: var(--tx-1);
+  border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+}
+
+/* 代码块（工具参数 / 返回内容 / SQL） */
+[data-testid="stCodeBlock"], [data-testid="stCodeBlock"] pre,
+[data-testid="stCode"] pre, pre {
+  background: color-mix(in srgb, var(--bg-body) 55%%, #000 8%%) !important;
+  border: 1px solid var(--line) !important; border-radius: 8px !important;
+}
+[data-testid="stCodeBlock"] code, [data-testid="stCodeBlock"] pre *,
+[data-testid="stCode"] code, [data-testid="stCode"] pre *, pre code, pre * {
+  color: var(--tx-1) !important;
+  font-family: %(mono)s !important; font-size: .78rem !important;
+}
+
+/* 提示条（思考中 / 警告）：默认浅蓝字在深色卡片上不可读 */
+[data-testid="stAlert"] { border: 1px solid var(--line); border-radius: 10px;
+  background: linear-gradient(160deg, var(--card-1), var(--card-2)); }
+[data-testid="stAlert"] :is(p, span, div) { color: var(--tx-1) !important; }
+[data-testid="stAlert"] svg { fill: var(--nav-active) !important; }
+
+/* 工具状态卡片（st.status 基于 expander，文字颜色需显式指定） */
+[data-testid="stExpander"] summary :is(span, p, div) { color: var(--tx-1); }
+[data-testid="stExpander"] [data-testid="stMarkdownContainer"] :is(p, span) { color: var(--tx-2); }
+
+/* 对话输入框 */
+[data-testid="stChatInput"] > div,
+[data-testid="stChatInput"] [data-baseweb="textarea"], [data-testid="stChatInput"] [data-baseweb="base-input"] {
+  background: var(--chip-bg2) !important;
+  border: 1px solid var(--line) !important; border-radius: 12px !important;
+}
+[data-testid="stChatInput"] textarea {
+  background: transparent !important; color: var(--tx-1) !important;
+}
+[data-testid="stChatInput"] textarea::placeholder { color: var(--tx-4) !important; }
+[data-testid="stChatInput"] button { color: var(--nav-active) !important; }
+[data-testid="stChatInput"] button svg, [data-testid="stChatInput"] svg { fill: var(--nav-active) !important; }
+
+/* 按钮（示例问题等次要按钮接入主题卡片色） */
+[data-testid="stButton"] button {
+  background: linear-gradient(160deg, var(--chip-bg1), var(--chip-bg2)) !important;
+  border: 1px solid var(--line) !important; border-radius: 10px !important;
+  color: var(--tx-1) !important;
+}
+[data-testid="stButton"] button p, [data-testid="stButton"] button span {
+  color: var(--tx-1) !important;
+}
+[data-testid="stButton"] button:hover {
+  border-color: color-mix(in srgb, var(--page-accent) 55%%, transparent) !important;
+  color: var(--nav-active) !important;
+}
+[data-testid="stButton"] button:hover p, [data-testid="stButton"] button:hover span {
+  color: var(--nav-active) !important;
+}
+
 /* 新闻条目 */
 .news-item {
   border-left: 2px solid color-mix(in srgb, var(--page-accent, #22d3ee) 48%%, transparent);
@@ -418,6 +493,41 @@ h1, h2, h3, [data-testid="stHeading"] * { color: #0f172a !important; }
 
 /* 链接与分页控件 */
 a, a span { color: #0e7490; }
+
+/* ---- 浅色主题：按钮（基础主题为 dark，未覆盖则深色底+深色字） ---- */
+[data-testid="stButton"] button {
+  background: #ffffff !important; color: #0f172a !important;
+  border: 1px solid rgba(15,23,42,.22) !important;
+  box-shadow: 0 1px 2px rgba(15,23,42,.06) !important;
+}
+[data-testid="stButton"] button p, [data-testid="stButton"] button span {
+  color: #0f172a !important;
+}
+[data-testid="stButton"] button:hover {
+  border-color: #0e7490 !important; color: #0e7490 !important;
+}
+[data-testid="stButton"] button:hover p, [data-testid="stButton"] button:hover span {
+  color: #0e7490 !important;
+}
+[data-testid="stButton"] button[kind="primary"],
+[data-testid="stButton"] button[kind="primary"] p {
+  background: #0e7490 !important; color: #ffffff !important;
+}
+
+/* ---- 浅色主题：对话输入框（容器与文本域都必须压白底） ---- */
+[data-testid="stChatInput"], [data-testid="stChatInput"] > div,
+[data-testid="stChatInput"] [data-baseweb="textarea"], [data-testid="stChatInput"] [data-baseweb="base-input"] {
+  background: #ffffff !important;
+}
+[data-testid="stChatInput"] textarea {
+  background: #ffffff !important; color: #0f172a !important;
+}
+[data-testid="stChatInput"] textarea::placeholder { color: #8593a8 !important; }
+[data-testid="stChatInput"] button { background: #eef2f9 !important; }
+[data-testid="stChatInput"] button svg, [data-testid="stChatInput"] svg { fill: #0e7490 !important; color: #0e7490 !important; }
+
+/* ---- 浅色主题：展开条/状态卡片的图标与次要文字 ---- */
+[data-testid="stExpander"] svg { fill: #475569 !important; }
 </style>
 """
 
