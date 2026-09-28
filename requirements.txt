@@ -9,3 +9,4 @@ pyarrow>=16.0
 langchain-core>=0.3
 langchain-openai>=0.2
 requests>=2.31
+scikit-learn>=1.4
