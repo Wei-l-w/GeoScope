@@ -38,13 +38,20 @@ MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-4o-mini")
 # 自纠正循环最大重试次数（pandas-ai 式：报错回传 LLM 重写）
 MAX_RETRIES = int(os.environ.get("GEOSQL_MAX_RETRIES", "3"))
 
+# SQL 执行保护（独立于 LLM 请求超时）
+MAX_QUERY_ROWS = int(os.environ.get("GEOSQL_MAX_ROWS", "1000"))
+QUERY_TIMEOUT = float(os.environ.get("GEOSQL_QUERY_TIMEOUT", "30"))
+
 # LLM 请求超时与重试（代理服务延迟高，默认 60s 容易误杀）
 LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "300"))
 LLM_RETRIES = int(os.environ.get("LLM_RETRIES", "2"))
 
-# 多轮记忆：注入最近 N 轮问答（每轮答案截断，控制 token 与延迟）
+# 多轮记忆：近期问答 + 早期摘录摘要 + 可恢复的结构化分析状态
 HISTORY_TURNS = int(os.environ.get("AGENT_HISTORY_TURNS", "5"))
 HISTORY_ANSWER_CHARS = int(os.environ.get("AGENT_HISTORY_ANSWER_CHARS", "800"))
+HISTORY_QUESTION_CHARS = int(os.environ.get("AGENT_HISTORY_QUESTION_CHARS", "2000"))
+HISTORY_TOOL_CHARS = int(os.environ.get("AGENT_HISTORY_TOOL_CHARS", "1600"))
+MEMORY_SUMMARY_CHARS = int(os.environ.get("AGENT_MEMORY_SUMMARY_CHARS", "3000"))
 
 
 def check_llm_ready() -> None:

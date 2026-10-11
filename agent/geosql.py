@@ -14,13 +14,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from . import config, db, fewshot
+from . import config, db, fewshot, sql_guard
 
 SYSTEM_PROMPT = """你是一个空间数据分析专家，负责把用户的自然语言问题转成 DuckDB SQL（GeoSQL）。
 
 规则：
-1. 只输出一条可执行的 SELECT 语句，用 ```sql 代码块包裹，不要输出任何解释；
-2. 只能使用下方给出的表和列，禁止编造表名/列名；
+1. 只输出一条可执行的 SELECT 语句（可用非递归 WITH），用 ```sql 代码块包裹，不要输出任何解释；
+2. 只能使用下方给出的表和列，禁止编造表名/列名；禁止文件、网络、表函数和动态 SQL；
 3. 空间过滤优先用经纬度范围（lat BETWEEN ... AND lon BETWEEN ...）；
    需要"附近/距离/缓冲区"时用公里距离公式或 spatial 函数（参考例题）；
 4. 纬度合法范围 [-90, 90]，经度 [-180, 180]；
@@ -54,6 +54,7 @@ class GeoSQLResult:
     rows: list[tuple] = field(default_factory=list)
     attempts: int = 0
     error: str | None = None
+    truncated: bool = False
 
     @property
     def ok(self) -> bool:
@@ -77,8 +78,7 @@ def _get_llm():
 def _extract_sql(text: str) -> str:
     m = re.search(r"```sql\s*(.*?)```", text, re.S | re.I)
     sql = (m.group(1) if m else text).strip().rstrip(";")
-    if not re.match(r"(?i)^\s*select\b", sql):
-        raise ValueError(f"LLM 输出不是 SELECT 语句：{sql[:120]}")
+    sql_guard.validate_sql(sql)
     return sql
 
 
@@ -122,9 +122,7 @@ def ask(question: str, verbose: bool = True) -> GeoSQLResult:
             if verbose:
                 print(f"[第 {attempt} 次尝试] SQL:\n{sql}\n")
             try:
-                cur = con.execute(sql)
-                result.columns = [d[0] for d in cur.description]
-                result.rows = cur.fetchall()
+                result.columns, result.rows, result.truncated = sql_guard.execute_query(con, sql)
                 return result
             except Exception as e:  # 自纠正：报错回传 LLM
                 last_error = str(e)

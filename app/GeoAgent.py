@@ -37,6 +37,53 @@ if "current_session_id" not in st.session_state:
 
 # ---- 侧栏：历史会话（持久化于 data/sessions.duckdb）----
 from agent import sessions as sessions_mod  # noqa: E402
+from agent import conversation  # noqa: E402
+
+
+def _memory_value(value) -> str:
+    """将结构化条件转为侧栏可读文本，避免把存储元数据直接暴露出来。"""
+    if isinstance(value, dict):
+        labels = {
+            "lat": "纬度", "lon": "经度", "start": "开始", "end": "结束",
+            "risk_level_min": "最低风险等级", "domain": "领域",
+            "target_class": "目标类别", "ship_type": "船型", "country": "国家",
+            "event_type": "事件类型",
+        }
+        return "；".join(f"{labels.get(k, k)}：{_memory_value(v)}" for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return "、".join(_memory_value(item) for item in value)
+    return str(value)
+
+
+def _render_memory(session_id: str | None) -> None:
+    """当前会话的记忆始终按会话 ID 读取，切换会话时不会沿用其他会话状态。"""
+    memory = conversation.get_memory(session_id) if session_id else {}
+    state = memory.get("state") or {}
+    summary = memory.get("summary") or ""
+    with st.expander("本会话记忆", expanded=False):
+        st.caption("连续追问会参考近期对话、早期摘要和下列分析条件。新会话独立记忆。")
+        fields = [
+            ("mmsi", "船号 MMSI"), ("place", "地点"), ("coordinates", "坐标"),
+            ("days", "最近天数"), ("time_range", "时间窗"),
+            ("radius_km", "半径（公里）"), ("table", "数据表"), ("filters", "筛选条件"),
+        ]
+        visible = [(label, state[key]) for key, label in fields
+                   if key in state and state[key] not in (None, "", {}, [])]
+        if visible:
+            for label, value in visible:
+                st.markdown(f"**{label}**：{_memory_value(value)}")
+        else:
+            st.caption("暂无已记录的分析条件。")
+        if summary:
+            st.markdown("**早期对话摘要**")
+            st.text(summary)
+        else:
+            st.caption("早期对话摘要：暂无；近期对话会直接用于连续追问。")
+        st.caption("清空后不再将此前对话用于分析；聊天记录和已有地图仍保留。")
+        if st.button("清空分析记忆", key="clear_analysis_memory", disabled=not session_id,
+                     use_container_width=True):
+            sessions_mod.clear_memory(session_id)
+            st.rerun()
 
 with st.sidebar:
     st.markdown("---")
@@ -45,13 +92,17 @@ with st.sidebar:
     if col_new.button("新会话", use_container_width=True):
         st.session_state.agent_messages = []
         st.session_state.current_session_id = None
+        st.session_state.session_picker = ""
         st.rerun()
     past = sessions_mod.list_sessions()
-    past_map = {f"{title}（{cnt}条）": sid for sid, title, _, cnt in past}
+    # 标题和消息数可能完全相同；用 ID 做选项值，避免字典覆盖导致会话丢失。
+    past_map = {sid: f"{title}（{cnt}条 · {sid[-6:]}）" for sid, title, _, cnt in past}
     if past_map:
-        chosen = st.selectbox("加载会话", [""] + list(past_map.keys()), key="session_picker")
+        chosen = st.selectbox("加载会话", [""] + list(past_map),
+                              format_func=lambda sid: past_map.get(sid, "请选择会话"),
+                              key="session_picker")
         if chosen and st.button("打开", use_container_width=True):
-            sid = past_map[chosen]
+            sid = chosen
             st.session_state.agent_messages = sessions_mod.load_messages(sid)
             st.session_state.current_session_id = sid
             st.rerun()
@@ -60,6 +111,7 @@ with st.sidebar:
             st.session_state.agent_messages = []
             st.session_state.current_session_id = None
             st.rerun()
+    _render_memory(st.session_state.current_session_id)
 
 
 def _geojson_layers(paths: list[str]) -> tuple[list, tuple[float, float, float]]:
@@ -156,20 +208,13 @@ with chat_col:
     question = question or pending
 
     if question:
-        # 多轮记忆：从已有消息中提取 (问, 答) 对注入上下文
-        history = []
-        msgs = st.session_state.agent_messages
-        for i in range(len(msgs) - 1):
-            if msgs[i]["role"] == "user" and msgs[i + 1]["role"] == "assistant":
-                history.append((msgs[i]["content"], msgs[i + 1]["content"]))
-
         st.session_state.agent_messages.append({"role": "user", "content": question})
         # 先持久化用户问题：即使运行中断线，历史里也能找回上下文
         sid = st.session_state.current_session_id
         if not sid:
             sid = sessions_mod.create_session(question)
             st.session_state.current_session_id = sid
-        sessions_mod.save_message(sid, "user", question)
+        user_seq = sessions_mod.save_message(sid, "user", question)
 
         with st.chat_message("user"):
             st.markdown(question)
@@ -178,11 +223,11 @@ with chat_col:
 
             thinking = st.empty()          # “思考中”占位
             tool_views = {}                # 进行中的工具卡片 {name: [st.status]}
-            steps, geojson_paths = [], []
+            steps, geojson_paths, tool_records = [], [], []
             live_paths = list(latest_geojson)  # 本轮已上图的 GeoJSON（累加）
             answer, error = "", None
 
-            for ev in react.stream(question, history=history):
+            for ev in react.stream(question, session_id=sid):
                 if ev["type"] == "thinking":
                     thinking.info(f"🤔 Agent 思考中（第 {ev['step']} 步）...")
                 elif ev["type"] == "tool_start":
@@ -208,6 +253,7 @@ with chat_col:
                     answer = result.answer or result.error or "（无回答）"
                     error = result.error
                     geojson_paths = result.geojson_paths
+                    tool_records = getattr(result, "tool_records", [])
             st.markdown(answer)
             if error:
                 st.caption(f"⚠️ {error}")
@@ -217,5 +263,6 @@ with chat_col:
             "steps": steps,
             "geojson": geojson_paths,
         })
-        sessions_mod.save_message(sid, "assistant", answer, steps, geojson_paths)
+        conversation.record_assistant(sid, answer, steps, geojson_paths,
+                                      tool_records=tool_records, error=error, reply_to_seq=user_seq)
         st.rerun()

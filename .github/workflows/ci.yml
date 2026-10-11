@@ -33,3 +33,6 @@ jobs:
 
       - name: Run offline tests (no LLM required)
         run: python -m pytest tests/ -q
+
+      - name: Initialize all Streamlit pages (no LLM required)
+        run: python scripts/smoke_test.py

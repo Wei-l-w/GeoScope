@@ -96,7 +96,7 @@ python -m agent.eval --out eval/report.md
 ```
 
 - 评测集 `eval/geosql_eval.jsonl`：16 条手工标注，覆盖区域 / 距离 / 聚合 / 排名 / 多表关联 / 时间窗 6 类空间查询；
-- 当前成绩：**16/16 = 100%**（平均约 20s/条，含 3760 万行表的关联查询）；
+- 已保存的历史成绩：**16/16 = 100%**（平均约 20s/条，含 3760 万行表的关联查询）；这是 16 条小规模评测，不代表当前接口状态或未见问题的准确率；
 - 评测驱动的迭代实例：首轮暴露「投影列不严格 / LIMIT 缺确定性排序」→ 加强生成规则 + 补例题后修复，完整对比见 [eval/report.md](eval/report.md)。
 
 ## 导入真实数据（原文件只读、不移动）
@@ -132,10 +132,18 @@ python -m ingest.load news       '<新闻正文抓取结果>.jsonl'
 ## 测试与 CI
 
 ```bash
-pytest tests/ -q    # 18 条离线单测，无需 LLM
+python -m pytest tests/ -q    # 离线回归，无需 LLM
+python scripts/smoke_test.py  # 首页及六个业务页初始化，会话库使用临时目录
 ```
 
-GitHub Actions（`.github/workflows/ci.yml`）：checkout → 安装依赖 → 样例数据建库 → compileall + pytest，推送即跑。
+GitHub Actions（`.github/workflows/ci.yml`）：checkout → 安装依赖 → 样例数据建库 → compileall + pytest + 七页初始化，推送即跑。
+
+执行边界：
+
+- 模型 SQL 经 DuckDB 原生语法树校验，仅允许单条 SELECT / 非递归 CTE、仓库业务表和已批准的计算函数；拒绝表函数、文件/网络读取和动态 SQL，并关闭执行连接的外部访问。
+- 查询默认最多返回 1000 行（`GEOSQL_MAX_ROWS`），超过时明确提示截断；聚合统计仍针对完整筛选范围。SQL 执行默认 30 秒后中断（`GEOSQL_QUERY_TIMEOUT`），不包含模型请求、解析及初始化耗时。
+- 同一工具跨模型轮次最多连续执行两次，第三次起阻断；航迹过滤非法坐标、保留起终点并严格最多 500 点，单点输出 Point。“最近 N 天”以 AIS 仓库最新时间为基准。
+- RAG 索引校验格式、scikit-learn 版本及实际检索能力，不兼容时从本地语料自动重建，使用原子替换保存；测试生成的索引和 GeoJSON 均使用临时目录。
 
 ## 设计决策（FAQ）
 
@@ -143,11 +151,21 @@ GitHub Actions（`.github/workflows/ci.yml`）：checkout → 安装依赖 → �
 - **RAG 为什么用 TF-IDF？** 检索接口按「embed → 向量 → 余弦 top-k」标准抽象，当前后端为 TF-IDF 稀疏向量（无 embedding 服务端点的环境可跑）；换 OpenAI/本地稠密模型只需替换嵌入后端，检索与工具层不动。
 - **跨语言检索**：语料为英文，Agent 自动把中文问题改写为英文关键词再检索（LLM query rewriting），不引入额外翻译模型。
 
+## 对话记忆
+
+- **近期问答**：默认带入最近 5 轮，历史问题、回答及工具证据分别设长度上限；当前问题完整保留。
+- **早期摘要**：更早的完整问答生成默认最多 3000 字符的滚动摘录，明确区分历史回答和执行失败；完整聊天仍保存在本地。
+- **分析状态**：单独记住明确的船号、地点/坐标、时间窗、半径、数据表及筛选条件。条件来源为用户原文或成功工具参数，失败及被阻断的工具不会补写事实；更改或取消条件以用户要求为准。
+- **会话恢复**：状态和摘要随会话存入 `data/sessions.duckdb`，重新打开会话即可恢复。旧会话自动兼容，新会话不继承其他会话的记忆。
+- **查看和清空**：侧栏“本会话记忆”显示当前条件与摘要。“清空分析记忆”保留聊天和地图，但清空前的消息不再进入后续上下文。
+
+摘要和条件整理均在本地完成，不额外调用模型 API。当前采用可追溯的规则提取与摘录；未识别的筛选要求保留原文，不会猜测日期、坐标或缺失结果。详见 [对话记忆说明](docs/conversation-memory.md)。
+
 ## Roadmap
 
 - [ ] 多智能体扩展：Critic 拆分为独立结果校验 Agent（当前以自纠正回路内嵌）
 - [ ] 路径规划工具：接入 OSRM / osmnx，封装为 Agent Tool（接口预留）
-- [ ] 滚动摘要式多轮记忆（当前为最近 N 轮全量注入）
+- [x] 会话隔离的近期问答、早期摘录摘要、结构化分析状态与清空/恢复
 - [ ] PostGIS 后端切换指南与适配层
 
 ## 项目结构
@@ -162,6 +180,8 @@ GitHub Actions（`.github/workflows/ci.yml`）：checkout → 安装依赖 → �
 │   ├── fewshot.py      # GeoSQL 错题本（检索式 few-shot）
 │   ├── rag.py          # RAG 知识库（嵌入后端抽象）
 │   ├── sessions.py     # 会话持久化（独立 duckdb）
+│   ├── memory.py       # 本地滚动摘录、分析状态与条件来源
+│   ├── conversation.py # 记忆持久化与模型上下文整合
 │   └── eval.py         # 执行准确率评测器
 ├── ingest/             # 入库脚本；mappings.py 是字段映射配置
 ├── eval/               # 评测集 + 报告

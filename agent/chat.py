@@ -49,6 +49,8 @@ def _run_direct(args) -> int:
         return 0
 
     print(f"共 {len(result.rows)} 行（尝试 {result.attempts} 次）：\n")
+    if result.truncated:
+        print("结果已达到查询上限，以下内容及 CSV 仅包含部分记录；请缩小范围或使用聚合统计。")
     print(" | ".join(result.columns))
     print("-" * 60)
     for row in result.rows[: args.max_rows]:

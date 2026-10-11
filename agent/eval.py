@@ -60,6 +60,8 @@ def run_eval(cases: list[dict]) -> tuple[list[dict], dict]:
                 pred_error = f"评测执行异常：{type(e).__name__}: {e}"
             elapsed = time.time() - t0
 
+            if pred_error is None and pred.truncated:
+                pred_error = "查询结果被行数上限截断，不能按完整结果计算执行准确率"
             if pred_error is None:
                 pred_rows = _norm_rows(pred.rows)
                 match = pred_rows == gold_rows

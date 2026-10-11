@@ -150,42 +150,63 @@ def buffer_analysis(lat: float, lon: float, radius_km: float, table: str = "acle
 
 @tool
 def ship_track(mmsi: int, days: int = 7) -> str:
-    """船舶航迹：取指定 MMSI 最近 days 天的 AIS 位置点，输出抽稀后的 GeoJSON 航迹线。
+    """船舶航迹：以仓库最新时间为基准取指定 MMSI 最近 days 天的有效 AIS 位置。
+    days 必须为正整数；最多输出 500 点并保留起终点，单点输出 GeoJSON Point。
     适合"这艘船最近走过哪里/是否经过某区域"。"""
+    if isinstance(days, bool) or not isinstance(days, int) or days <= 0:
+        return "参数非法：days 必须为正整数（天数）。"
+
     with db.connect() as con:
-        total = con.execute(
-            "SELECT COUNT(*) FROM ais_positions WHERE mmsi = ? "
-            "AND ts >= (SELECT MAX(ts) FROM ais_positions) - INTERVAL (?) DAY",
-            [mmsi, days],
-        ).fetchone()[0]
-        if total == 0:
-            return f"未找到 MMSI={mmsi} 最近 {days} 天的位置（可能无数据或时间窗不对）。"
-        step = max(1, total // _MAX_TRACK_POINTS)
+        # 在数据库内过滤及抽稀，只把最多 500 个点搬到 Python。
+        # 按序号分成 499 个间隔，取每个间隔的首点并显式保留起点。
+        # 整数除法避免浮点边界误差；终点恰好落在最后一个间隔的起点。
         rows = con.execute(
             f"""
-            SELECT ts, lat, lon, sog FROM (
-                SELECT ts, lat, lon, sog,
-                       ROW_NUMBER() OVER (ORDER BY ts) AS rn
+            WITH ordered AS (
+                SELECT ts, lat, lon,
+                       ROW_NUMBER() OVER (ORDER BY ts, lat, lon) AS rn,
+                       COUNT(*) OVER () AS total
                 FROM ais_positions
                 WHERE mmsi = ?
                   AND ts >= (SELECT MAX(ts) FROM ais_positions) - INTERVAL (?) DAY
-            ) WHERE rn % {step} = 1 ORDER BY ts
+                  AND lat BETWEEN -90 AND 90
+                  AND lon BETWEEN -180 AND 180
+                  AND isfinite(lat) AND isfinite(lon)
+            )
+            SELECT ts, lat, lon, total FROM ordered
+            WHERE total <= {_MAX_TRACK_POINTS} OR rn = 1
+               OR ((rn - 1) * ({_MAX_TRACK_POINTS} - 1)) // GREATEST(total - 1, 1)
+                    > ((rn - 2) * ({_MAX_TRACK_POINTS} - 1)) // GREATEST(total - 1, 1)
+            ORDER BY rn
             """,
             [mmsi, days],
         ).fetchall()
 
+    if not rows:
+        return (
+            f"未找到 MMSI={mmsi} 以仓库最新时间为基准最近 {days} 天的有效位置"
+            "（可能无数据、时间窗不对或经纬度为空/非法）。"
+        )
+    total = rows[0][3]
+    coordinates = [[r[2], r[1]] for r in rows]
+    geometry = (
+        {"type": "Point", "coordinates": coordinates[0]}
+        if len(rows) == 1
+        else {"type": "LineString", "coordinates": coordinates}
+    )
     geojson = {
         "type": "FeatureCollection",
         "features": [{
             "type": "Feature",
             "properties": {"mmsi": mmsi, "days": days, "points_total": total, "points_shown": len(rows)},
-            "geometry": {"type": "LineString", "coordinates": [[r[2], r[1]] for r in rows]},
+            "geometry": geometry,
         }],
     }
     path = _save_geojson(f"track_{mmsi}", geojson)
     t0, t1 = rows[0][0], rows[-1][0]
     return (
-        f"MMSI={mmsi} 航迹：{t0} ~ {t1}，共 {total} 个位置点，抽稀为 {len(rows)} 点。"
+        f"MMSI={mmsi} 航迹（以仓库最新时间为基准最近 {days} 天）：{t0} ~ {t1}，"
+        f"共 {total} 个有效位置点，展示 {len(rows)} 点（已过滤空值及非法经纬度，保留起终点）。"
         f"GeoJSON 已保存：{path}"
     )
 
@@ -241,6 +262,8 @@ def query_database(question: str) -> str:
     preview = "\n".join(" | ".join("" if v is None else str(v) for v in row) for row in result.rows[:15])
     if len(result.rows) > 15:
         preview += f"\n... 共 {len(result.rows)} 行，仅展示前 15 行"
+    if result.truncated:
+        preview += f"\n查询结果超过上限，仅返回前 {len(result.rows)} 行；不是全部记录，请缩小范围或使用聚合统计。"
     geo_note = _rows_to_geojson(result) or ""
     return f"SQL：{result.sql}\n\n列：{' | '.join(result.columns)}\n{preview}{geo_note}"
 
