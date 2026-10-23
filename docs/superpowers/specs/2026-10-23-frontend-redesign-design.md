@@ -56,33 +56,36 @@ app/
 ├─ sessions_ui.py        侧栏：新建分析、最近会话列表、本会话记忆卡片
 ├─ chat_ui.py            消息、分析过程、空状态示例、中断标注、输入区、··· 菜单
 ├─ map_view.py           图层拆分、累积、开关、视野、图例、下载
-├─ theme_watch.py        主题监听组件（components v2，约 20 行 JS）与 mode()
-├─ ui.py                 看板组件 + 数据配色常量；删除三套 THEMES 与主题下拉框
+├─ theme_watch.py        主题监听组件（components v2，约 10 行 JS）与 mode()
+├─ palette.py            数据配色常量与色阶函数（不依赖 Streamlit，便于单测）
+├─ ui.py                 看板组件；删除三套 THEMES 与主题下拉框
 ├─ styles/base.css       设计令牌（light-dark()）+ 看板组件样式
 ├─ styles/workspace.css  工作台布局（替代 app/chat.css，后者删除）
 ├─ static/logo.svg       Logo，内置 prefers-color-scheme 切换颜色
-└─ pages/*.py            原地保留，只改配色调用、导入方式、占位文案和少量参数
+└─ dashboards/*.py       由 pages/ 改名（原因见下）；只改配色调用、导入方式、占位文案和少量参数
 agent/                   不改
 ```
 
 - **入口**：`GeoAgent.py` 从"页面"变成"路由"。Docker CMD、README 启动命令、`AppTest.from_file("app/GeoAgent.py")` 都不用改（已验证 AppTest 能跑 `st.navigation` 入口）。
-- **导航**：`st.navigation(position="top")` 显式注册 7 个页面，`pages/` 目录不再自动发现。窄屏时原生折叠成"N more"下拉。
+- **导航**：`st.navigation(position="top")` 显式注册 7 个页面，窄屏时原生折叠成"N more"下拉。
+- **看板页目录改名为 `dashboards/`**（样机实测）：Streamlit 启动时只要入口旁有 `pages/`，就先按旧版多页模式运行，直到某个会话打开首页、执行到 `st.navigation` 才切换；在那之前直接打开看板页链接（例如重启后先访问 `/总览`）会绕过路由，导航退回旧版侧栏。改名后 URL 不变，仍由文件名推断。
 
 | 页面 | 文件 | 导航名 | 图标 |
 | --- | --- | --- | --- |
 | 工作台（默认） | `workspace.py` | 工作台 | `:material/explore:` |
-| 总览 | `pages/1_总览.py` | 总览 | `:material/dashboard:` |
-| AIS | `pages/2_AIS船舶地图.py` | AIS 船舶 | `:material/directions_boat:` |
-| ACLED | `pages/3_ACLED事件.py` | ACLED 事件 | `:material/warning:` |
-| 时空叠加 | `pages/4_时空叠加.py` | 时空叠加 | `:material/layers:` |
-| 新闻 | `pages/5_新闻检索.py` | 新闻检索 | `:material/article:` |
-| GDELT | `pages/6_全球背景参考.py` | GDELT 背景 | `:material/public:` |
+| 总览 | `dashboards/1_总览.py` | 总览 | `:material/dashboard:` |
+| AIS | `dashboards/2_AIS船舶地图.py` | AIS 船舶 | `:material/directions_boat:` |
+| ACLED | `dashboards/3_ACLED事件.py` | ACLED 事件 | `:material/warning:` |
+| 时空叠加 | `dashboards/4_时空叠加.py` | 时空叠加 | `:material/layers:` |
+| 新闻 | `dashboards/5_新闻检索.py` | 新闻检索 | `:material/article:` |
+| GDELT | `dashboards/6_全球背景参考.py` | GDELT 背景 | `:material/public:` |
 
-- **导入统一**：看板页改为 `from app import ui` / `from app.db import query`（入口把项目根加入 `sys.path`），避免同一模块以 `ui` 和 `app.ui` 两个名字各加载一份、主题监听组件重复注册。
+- **导入统一**：看板页改为 `from app import palette, ui` / `from app.db import query`（入口把项目根加入 `sys.path`），避免同一模块以 `ui` 和 `app.ui` 两个名字各加载一份。
 - **主题监听**：`theme_watch.mode(busy=False)` 返回 `"light"` / `"dark"`。看板页由 `ui.setup()` 调用；工作台在判断出"本轮是否有提交"之后再调用（见 6.2）。
-  - 实现：用 `st.components.v2` 注册一个不显示内容的组件，`data` 传入 `{"known": 上次已知主题, "busy": busy}`。
-  - 组件 JS 在挂载时，以及页面 class 变化时，读取 `.stApp` 计算后的 `color-scheme`；只在"不忙、且与 `known` 不同"时调用 `setStateValue("mode", 值)` 触发一次重跑。
-  - Python 侧把结果存进 `st.session_state["_ui_mode"]`。拿不到结果时，依次回退到 `st.context.theme.type`、`"light"`。
+  - 实现：用 `st.components.v2` 注册一个不显示内容的组件，`data` 传入 `{"known": 当前采用的主题, "busy": busy}`。
+  - 组件的 `data` 或主题变化时，Streamlit 会重新执行组件 JS（不需要 MutationObserver）。JS 读取 `.stApp` 计算后的 `color-scheme`，只在"不忙、且与 `known` 不同"时调用 `setStateValue("mode", 值)` 触发一次重跑。
+  - `known` 必须是 Python 此刻实际采用的值：优先取组件上次上报、已生效的值（`st.session_state["geoscope_theme_watch"]["mode"]`），其次 `st.session_state["_ui_mode"]`，再依次回退到 `st.context.theme.type`、`"light"`。若传入上报前的旧值，Light → Dark → Light 切回原主题时 JS 会以为没变化而不上报（样机实测）。
+  - 每次运行都调用 `components.v2.component(...)` 注册：定义不变时 Streamlit 静默覆盖。AppTest 每个实例的组件注册表是独立的，只在模块导入时注册一次，会让同一进程里第二个 AppTest 报"Component … is not registered"（样机实测）。
 
 ## 4. 主题与设计令牌
 
@@ -95,7 +98,7 @@ codeFont = "Cascadia Mono, JetBrains Mono, Consolas, monospace"
 baseRadius = "0.6rem"
 showWidgetBorder = true
 headingFontSizes = ["1.75rem", "1.375rem", "1.125rem", "1rem", "0.9rem", "0.8rem"]
-chartCategoricalColors = ["#2563EB", "#C2410C", "#0D9488", "#B45309", "#DB2777", "#8B5CF6", "#15803D", "#DC2626"]
+chartCategoricalColors = ["#2563EB", "#C2410C", "#0D9488", "#B45309", "#DB2777", "#8B5CF6", "#15803D", "#DC2626", "#2563EB", "#C2410C"]
 
 [theme.light]
 primaryColor = "#0F766E"
@@ -134,6 +137,7 @@ headless = true
 
 - 同时定义 `[theme.light]` 与 `[theme.dark]` 后，⋮ 菜单出现 System / Light / Dark，默认跟随系统（已验证）。
 - `chartCategoricalColors` 不能分主题配置：写在 `[theme.light]` / `[theme.dark]` 里会被静默忽略（已验证），只能写在 `[theme]`，所以这套色板必须同时适配两种主题（见 5.1）。
+- `chartCategoricalColors` 必须**正好 10 个**（样机实测）：Streamlit 的 Plotly 模板有 10 个占位色（`#000001`–`#000010`），前端按下标替换成配置的颜色，少配的被替换成字符串 `"undefined"`，Plotly 判定整套 colorway 无效，图表退回 Plotly 默认色（总览页饼图曾因此显示蓝 / 橙 / 绿默认色）。第 9、10 个循环使用第 1、2 个。
 - `pydeck` 不传 `map_style`，Streamlit 前端按主题自动选底图：浅色 Carto Positron，深色 Carto Dark Matter（已验证）。
 
 ### 4.2 设计令牌（`styles/base.css`）
@@ -177,12 +181,12 @@ headless = true
 | 2 | 主区域顶部与左右留白收紧 | 原生较宽留白 |
 | 3 | 地图圆角 + 描边 | 原生直角无边框 |
 | 4 | 用户消息气泡靠右、隐藏用户头像 | 与助手消息同样左对齐 |
-| 5 | 窄于 1000px 时对话与地图上下排列 | 保持并排（较挤） |
-| 6 | 图层按钮单行横向滚动 | 自动换行 |
+| 5 | 窄于 1000px 时对话与地图上下排列（只作用于最外层两栏；样机里曾误伤标题栏和示例按钮的内部横排） | 保持并排（较挤） |
+| 6 | ~~图层按钮单行横向滚动~~（取消：图层栏改为 `st.columns`，左侧图层按钮自动换行，复位、下载两个图标按钮固定在右侧） | — |
 | 7 | 会话列表按钮文字左对齐、单行省略 | 居中、可换行 |
-| 8 | 工作台高度填满视口（对话区内部滚动） | 回退到固定高度：对话 520px、地图 600px |
+| 8 | 工作台高度填满视口：用 `:has()` 选中两个面板外层的 `stLayoutWrapper`，高度 `calc(100dvh - 5.5rem)`；对话历史与地图画布的外层改为 `flex: 1` | 回退到 Python 里写的固定高度：对话 520px、地图 600px（样机实测） |
 
-- 预算：自定义 CSS 合计 ≤ 250 行（目标 200 行以内）；`[data-testid]` ≤ 20 处，且都属于上表。
+- 预算：自定义 CSS 合计 ≤ 250 行（目标 200 行以内）；`[data-testid]` ≤ 20 处，且都属于上表。样机实测：两个文件共 123 行，`[data-testid]` 16 处。
 
 ## 5. 数据配色系统
 
@@ -315,8 +319,8 @@ ACLED 事件点按类型着色，地图上最多 3 色加"其他"。地图上任
   - 「最近会话」：放在固定高度 320px 的可滚动容器里，约显示 8 条（数据来自 `list_sessions()`，最多 50 条）。每条是一个按钮，标签是会话标题，key 为 `session_<sid>`；悬停提示显示"N 条消息 · 创建时间"。当前会话用 secondary 样式（有底有边框），其余用 tertiary 样式。
   - 「本会话记忆」卡片：`st.container(border=True)`。
     - 字段沿用现有标签：船号 MMSI、地点、坐标、最近天数、时间窗、半径（公里）、数据表、筛选条件。
-    - 无条件时显示"暂无已记录的分析条件。"。
-    - 「早期对话摘要」放在折叠区里，用 `st.text` 输出。
+    - 无条件时显示"暂无已记录的分析条件。新会话独立记忆。"。
+    - 「早期对话摘要」放在折叠区里，用 `st.text` 输出；没有摘要时显示 caption"早期对话摘要：暂无"。
     - 「清空分析记忆」：tertiary 按钮，key `clear_analysis_memory`，没有会话时禁用。
 - **主区域**：两栏，对话 : 地图 = 5 : 7，高度填满视口（增强样式 #8）。
 - **对话面板**
@@ -325,8 +329,8 @@ ACLED 事件点按类型着色，地图上最多 3 色加"其他"。地图上任
   - 历史区：固定高度 520px 的滚动容器，`autoscroll=True`；增强样式 #8 生效时拉伸填满面板。
   - 输入区：`st.chat_input("输入地点、船号或分析问题…", key="geoagent_prompt", submit_mode="disable")`，下方 caption"Enter 发送 · Shift+Enter 换行"。
 - **地图面板**
-  - 图层栏：`st.pills`（多选）、「复位」按钮（key `map_reset`）、「下载」popover。
-  - 地图画布：高度 600px；增强样式 #8 生效时拉伸填满面板。
+  - 图层栏：`st.columns([12, 1, 1.5])`，左侧 `st.pills`（多选，按钮多时换行），右侧两个图标按钮：「复位」（key `map_reset`）与「下载」popover（key `map_download`）。
+  - 地图画布：`st.container(height=600, key="map_canvas")` 里放 `st.pydeck_chart(height="stretch")`；增强样式 #8 生效时拉伸填满面板。
   - 底栏：统计 + 事件类型图例。
 
 ### 6.2 渲染顺序与"防打断"
@@ -342,6 +346,10 @@ Streamlit 的每次点击都会让脚本从头重跑，并中止正在运行的�
    2. 调用 `react.stream(...)` 流式更新状态和地图；
    3. 保存回答；
    4. `st.rerun()`。
+
+地图的画法（样机实测，也是样机里"切换图层后视野被重置"的真正原因）：平时直接画进 `map_canvas` 容器，key 固定为 `workspace_map`，重跑时地图组件不重新挂载，保留用户拖动过的视野。不能先建 `st.empty()` 再往里画——空占位会先把旧地图换掉，视野随之丢失。只有分析进行中才用 `st.empty()` 槽位，每次有新结果换一个 key，强制重新定位到新结果。
+
+样机实测（模拟流式）：分析进行中侧栏按钮、图层按钮、复位、下载和输入框全部禁用，结束后全部恢复。
 
 ### 6.3 消息
 
@@ -416,10 +424,10 @@ Streamlit 的每次点击都会让脚本从头重跑，并中止正在运行的�
 ### 7.4 视野
 
 - 视野始终定位到"最新一轮产出图层的全部范围"，与图层是否隐藏无关。
-- 只有初始视野变化时，deck.gl 才会重置地图。`Deck.setProps` 里做了比较，这一点已在 Streamlit 1.59 的前端源码里确认；但切换图层时 Streamlit 会不会整体重新挂载地图组件，还没有验证，见第 13 节第 7 条。按设计，效果应当是：
+- 只有初始视野变化时，deck.gl 才会重置地图（`Deck.setProps` 里做了比较）。按 6.2 的画法，样机实测：
   - 新结果到达、打开会话、刷新页面时会自动定位；
-  - 切换图层开关时，视野不会被重置。
-- **复位**按钮：在会话状态里递增一个计数，把纬度加上 `计数 × 1e-7°`，强制 deck.gl 重置到最新结果。
+  - 切换图层开关时地图组件不重新挂载，视野保持（先拖动再切换，地图区像素变化 0.06%）。
+- **复位**按钮：在会话状态里递增一个计数，把 `计数 × 1e-7` 同时加到纬度、经度、缩放、俯仰、方位五个字段，强制 deck.gl 重置到最新结果。Streamlit 只覆盖初始视野里"变了"的字段，只改纬度会留下用户拖动后的经度与缩放（样机实测；五个字段一起改后，复位后与初始视野的像素差为 0）。
 - 计算方法：
   1. 按名义视口 720×560 像素，在 Web 墨卡托投影下分别算出经度、纬度两个方向各自需要的缩放级别，取较小值；
   2. 四周留 12% 边距；
@@ -429,7 +437,7 @@ Streamlit 的每次点击都会让脚本从头重跑，并中止正在运行的�
 ### 7.5 配色、提示、统计与下载
 
 - 配色见 5.5。地图数据图层按 `theme_watch.mode()` 选色；监听不可用时按浅色处理。
-- 悬停提示：每个要素预先生成中文 `tip` 字段，tooltip 统一用 `{tip}`。tooltip 的样式用 CSS 变量取色，随主题变化。
+- 悬停提示：每个要素预先生成中文 `tip` 字段，tooltip 统一用 `{tip}`。tooltip 的样式按 `mode()` 传两套固定色（采用第 13 节第 6 条的备选方案）。
   - 事件点：`2023-12-15 · 爆炸/远程暴力 · Strait of Bab el Mandeb · 距中心 37 km`
   - 航迹：`MMSI 668116204 · 展示 76 / 共 N 点`
   - 缓冲区：`缓冲区 · 半径 150 km`
@@ -484,7 +492,11 @@ Streamlit 的每次点击都会让脚本从头重跑，并中止正在运行的�
 - **侧栏筛选**
   - 多选框加 `placeholder="全部"`，标签去掉"（默认全部）"；
   - `st.header("筛选")` 改成 `st.subheader`。
-- **总览地图视野**：改为按全部事件的范围定位（现在偏南，以色列 / 黎巴嫩落在画面外）。
+- **地图视野**（共用 `ui.fit_bounds`，与工作台同一套墨卡托算法）：
+  - 总览：按全部事件的范围定位（原来偏南，以色列 / 黎巴嫩落在画面外）；
+  - AIS、ACLED：按当前数据范围定位（原来固定 5 级 / 4.2 级，红海南段被切掉）；
+  - 时空叠加：按所选区域的查询范围定位（原来所有区域固定 5 级：红海全域显示不全、曼德海峡又显得过远），"全球"保持 1.8 级。
+- **文案**：总览页导航表与新闻检索页标题里的"GeoAgent"改为"工作台"，页面名与新导航一致。
 
 ### 8.2 逐页配色映射
 
@@ -497,7 +509,7 @@ Streamlit 的每次点击都会让脚本从头重跑，并中止正在运行的�
 | 总览 | 国家分布（按死亡数着色） | 青 → 琥珀 → 红 | ACLED 红顺序色阶 |
 | 总览 | 咽喉要道饼图 | 主题默认 | 分类色板 1–3（已验证两两组合） |
 | AIS | 航迹按船型 | 8 种船型 8 色 | 货船 `#2563EB` / 油轮 `#C2410C` / 其他（5.5 的"其他"灰），图例 3 项 + 最新位置 |
-| AIS | 最新位置点 | 白点 + 青描边 | 白点，描边浅色 `#1B1D1F`、深色 `#0A0F1A` |
+| AIS | 最新位置点 | 白点 + 青描边 | 正文色实心点 + 背景色描边：浅色 `#1B1D1F` / `#FFFFFF`，深色 `#E7ECF3` / `#0A0F1A`（原方案白点在图例里与页面底色几乎相同，看不出来） |
 | AIS | 密度热力图 | 同总览旧色带 | AIS 蓝顺序色阶 |
 | ACLED | 地图点、每周时间线（按阶段） | 蓝 / 琥珀 / 红 | 危机阶段有序色阶 |
 | ACLED | 因果角色、咽喉要道柱图 | 红 / 琥珀 | ACLED 红（单系列） |
@@ -514,13 +526,12 @@ AIS 船型改为 3 类的依据（`ais_ships` 实际数据）：货船 2480 艘�
 
 ### 8.3 `ui.py` 接口
 
-- **保留**：`setup(title, watch=True)`、`page_header`、`kpi_row`、`legend`、`panel`、`deck`（不传 `map_style`，tooltip 用令牌取色）、`chart`、`style_fig`、`C_AIS` / `C_ACLED` / `C_GDELT`（值改为数据源色）。
+- **保留**：`setup(title, *, watch=True)`、`page_header`、`kpi_row`、`legend`、`panel`、`deck`（不传 `map_style`，tooltip 按 `mode()` 取色）、`chart`、`style_fig`、`C_AIS` / `C_ACLED` / `C_GDELT` / `C_NEWS`（值改为数据源色）。
 - **新增**
   - `mode()`：返回本次运行中已经确定的主题，也就是 `setup()` 或工作台调用 `theme_watch.mode()` 得到的值；
-  - 色板常量：`PALETTE`、`SOURCE`；
-  - 色阶函数：`ordinal(n, mode)`、`diverging(mode)`、`sequential(hue, mode)`；
-  - `OTHER_GRAY`、`EVENT_COLORS`；
-  - `rgb(hex)` 辅助函数。
+  - `fit_bounds(left, bottom, right, top, viewport, padding)`：看板页与工作台共用的视野计算（7.4）；
+  - `inject_css(*names)`、`tooltip_style()`。
+- **数据配色放在独立模块 `app/palette.py`**（不依赖 Streamlit，便于单测）：常量 `PALETTE`、`SOURCE`、`ORDINAL`、`DIVERGING`、`SEQUENTIAL`、`EVENT_COLORS`、`EVENT_LABELS`、`OTHER_GRAY`、`MAP`；函数 `rgb(hex)`、`ordinal(n, mode)`、`sequential(hue, mode)`、`diverging(value, mode)`、`event_group` / `group_label` / `type_label` / `event_color`、`oklab(hex)`。
 - **删除**：`THEMES`、`THEME_KEY`、`DEFAULT_THEME`、`_CSS`、`_LIGHT_CSS`、`_TOOLTIP_*`、`_current_theme`、`_is_light`，以及无外部引用的 `ACCENT`、`PLOTLY_WAY`、`FONT_STACK`、`MONO_STACK`、`ACLED_TYPE_COLORS`。
 
 ## 9. 错误处理与降级
@@ -540,19 +551,25 @@ AIS 船型改为 3 类的依据（`ais_ships` 实际数据）：货船 2480 艘�
 
 - `tests/test_chat_workspace.py`
   - `_open` 改为点击 `session_<sid>`；
-  - "新会话"改为"新建分析"；
-  - "分析过程 · 1 步"改为前缀匹配。
+  - "新会话"改为"新建分析"（key `new_analysis`）；
+  - 分析过程标签改为"分析过程 · 1 步 · 查询船舶航迹"。注意：带图标的 `st.expander` 在 AppTest 里归为 `Status`（`st.status` 就是带图标的折叠区），要用 `.status[0]` 读取。
 - `tests/test_map_display.py`
   - `_open` 同上；
+  - `map_view.prepare(paths)` 改为 `map_view.build([(轮次, paths)])`；
   - 地图统计和空状态的断言改为新文案；
   - deck 的图层数和初始视野断言不变。
 - `tests/test_memory_ui.py`
   - `_open` 同上；
   - 会话下拉选项数改为会话按钮数；
-  - "新会话"改为"新建分析"。
+  - "新会话"改为"新建分析"；
+  - "早期对话摘要"改为检查侧栏折叠区的标签。
 
 ### 10.2 新增测试
 
+- `tests/test_palette.py`：色板与角色色、有序 / 顺序色阶明度单调且深色版反转、发散色阶中点与两臂、事件类型归并。
+- `tests/test_theme_watch.py`（AppTest）：回退顺序；组件上报值会作为 `known` 传回前端（防止切回原主题时不上报）；`busy` 透传；多个 AppTest 都能挂载组件。
+- `tests/test_ui.py`：`fit_bounds` 的墨卡托计算与 2–9 级限制；看板页不再含换皮前的霓虹色、`accent=`、旧导入与旧文案。
+- `tests/test_navigation.py`：默认页为工作台；路由注册工作台 + 6 个看板页且文件都存在；入口旁没有 `pages/` 目录。
 - `tests/test_map_layers.py`（单元测试）
   - 按要素拆分图层；
   - 命名与"第 N 轮"；
@@ -568,12 +585,14 @@ AIS 船型改为 3 类的依据（`ais_ships` 实际数据）：货船 2480 艘�
 - `tests/test_workspace_sessions.py`（AppTest）
   - 点击会话即可打开；
   - 当前会话的按钮样式；
-  - 中断提问的标注，以及「重新填入」只填不发。
+  - 中断提问的标注，以及「重新填入」只填不发；旧数据（无 `reply_to_seq`）不误标；
+  - ··· 菜单删除会话；无会话时菜单禁用；
+  - 分析进行中全部控件禁用（`AppTest.from_function` 以 `busy=True` 渲染各区块）。
 - `tests/test_theme.py`
   - `config.toml` 能解析，浅色和深色两套齐全；
-  - `chartCategoricalColors` 和 `ui` 里的色板常量与第 5 节一致；
-  - 文字令牌对比度 ≥ 4.5（测试内实现 WCAG 公式）；
-  - CSS 上限：≤ 250 行，`[data-testid]` 只出现在 4.3 的登记表里。
+  - `chartCategoricalColors` 等于 `palette.PALETTE` 补满 10 个；地图缓冲区色、圆环色与原生主题一致；
+  - 文字令牌对比度 ≥ 4.5（测试内实现 WCAG 公式），令牌与原生主题色一致；
+  - CSS 上限：≤ 250 行，`[data-testid]` 只出现在 4.3 的登记表里，`.py` 文件不再内嵌 CSS 选择器。
 
 ### 10.3 冒烟
 
@@ -600,6 +619,7 @@ AIS 船型改为 3 类的依据（`ais_ships` 实际数据）：货船 2480 艘�
   - 之后的实现。
 - `requirements.txt` 改为 `streamlit>=1.59`。所有用到的能力都是在 1.59 上验证的，更早的版本没有验证过。
 - README 更新界面说明（深浅主题、会话列表、图层开关），换上浅色、深色界面截图各一张，放在 `docs/`。
+- `scripts/capture_screens.py`：无头 Chrome 截图脚本，按主题、尺寸截取各页，用于视觉验收与 README 配图（需要本机 Chrome 与 `websocket-client`，不进 `requirements.txt`）。
 - `.gitignore` 加入 `.superpowers/`（头脑风暴的草稿目录）。
 - README 的三段演示 GIF 不在本次范围。
 
@@ -627,20 +647,29 @@ AIS 船型改为 3 类的依据（`ais_ships` 实际数据）：货船 2480 艘�
 - Logo SVG 在系统深色和手动 Dark 下都能换色；
 - `chat_input` 的 `submit_mode` 行为（以文档为准）。
 
-实施时需要先验证：
+实施前需先验证的各项，已在样机里逐一验证（2026-10-23，无头 Chrome + AppTest）：
 
-1. **视口高度填充**：`st.container(height=…)` 配合 CSS 拉伸，以及 `st.pydeck_chart(height="stretch")` 在 flex 容器中的表现。不行就回退固定高度（增强样式 #8）。
-2. **主题监听**：挂载时上报是否每次都触发重跑。通过 `data` 传入 Python 已知的值，只在不同时才上报；切页后重新挂载；分析进行中延后上报。
-3. **分类色板的作用范围**：`chartCategoricalColors` 写在 `[theme]` 时，是否对浅色和深色两套都生效。
-4. **`st.pills` 选项增减时的控件状态**：用含摘要的 key 加自己管理的状态来规避。
-5. **`st.html` 注入纯 `<style>` 是否占用布局空间**：样机里没观察到。
-6. **deck tooltip 用 CSS 变量取色是否生效**：不生效就按 `mode()` 传两套固定色。
-7. **切换图层时视野是否保持**：Streamlit 在图层数据变化时，是否只更新地图组件的属性、而不重新挂载。如果会重新挂载，需要改为前端保存视野，例如用 `on_select` 回传或 v2 组件，实施计划里单独评估。"复位"按钮依赖同一机制。
+1. **视口高度填充**：成立。1440×900 与 1366×768 下两个面板填满视口，对话历史与地图画布在面板内伸缩，无多余滚动条；做法见 4.3 #8。去掉 #8 后退回对话 520px、地图 600px（地图画布因此用固定高度容器，而不是 `height="stretch"` 容器——后者在 #8 失效时只剩 100px）。
+2. **主题监听**：成立，并修正了一处设计（第 3 节）。系统深色时第一次运行即为 dark，无额外重跑；菜单切换每次恰好触发 1 次重跑；Light → Dark → Light → Dark → System 往返均正确；分析进行中不上报。
+3. **分类色板的作用范围**：写在 `[theme]` 对两套主题都生效，但必须配满 10 个（4.1）；补满后总览页饼图实测取到 `#2563EB` `#C2410C` `#0D9488`。
+4. **`st.pills` 选项增减时的控件状态**：含摘要的 key + 自己管理的隐藏集合可行：新图层默认显示，已隐藏的保持隐藏，按会话隔离（`test_workspace_layers.py`）。
+5. **`st.html` 注入纯 `<style>`**：不占布局高度。
+6. **deck tooltip 取色**：采用备选方案，按 `mode()` 传两套固定色。
+7. **切换图层时视野是否保持**：成立，不需要前端保存视野。样机里一度出现"切换即重置"，真正原因是页面先建了 `st.empty()` 再画地图（见 6.2）。复位依赖同一机制，按 7.4 改为五个字段一起微调后生效。
 8. **Carto 底图依赖外网**：与现在相同。
+
+样机中新发现、已写入上文的问题：
+
+- 入口旁的 `pages/` 目录会让 Streamlit 先按旧版多页模式运行，看板页改放 `dashboards/`（第 3 节）。
+- `chartCategoricalColors` 少于 10 个会让 Plotly 退回默认色（4.1）。
+- AppTest 每个实例有独立的组件注册表，组件要在每次运行时注册（第 3 节）。
+- 带图标的 `st.expander` 在 AppTest 里归为 `Status`（10.1）。
+- 增强样式 #5 的选择器必须只命中最外层两栏（4.3）。
 
 ## 附录：验证记录
 
 - 基线（2026-10-23，改版前）：`pytest` 223 passed；冒烟 7/7。
+- 样机（2026-10-23，临时副本，未进仓库）：`pytest` 281 passed（新增 58 个）；冒烟 7/7。实施计划见 `docs/superpowers/plans/2026-10-23-frontend-redesign.md`。
 - 真实数据
   - ACLED 类型：Explosions/Remote violence 903、Battles 247、Protests 207、Strategic developments 199、Violence against civilians 7、Riots 2。
   - 关联层级：C 774、B 696、A 直接 93、A 支撑 2。
