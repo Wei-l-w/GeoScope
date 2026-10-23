@@ -136,3 +136,58 @@ def test_new_layers_show_by_default_while_hidden_ones_stay_hidden(store, geojson
     _open(app, sid)
     assert app.pills[0].value == [f"{new}#events"]
     assert "2 个图层 · 2 个要素（1 个已隐藏）" in _captions(app)
+
+
+EXPLOSION = _feature("Point", [43.3, 12.6], event_type="Explosions/Remote violence")
+GDELT_POINT = _feature("Point", [43.4, 12.7], event_code="190", country="Yemen")
+
+
+def _chips_page(message, mode):
+    from app import chat_ui
+
+    chat_ui.render_message(message, mode)
+
+
+def _chips(app):
+    return next(str(item.value) for item in app.markdown if "gs-results" in str(item.value))
+
+
+def test_result_chip_colour_follows_the_event_type_on_the_map(geojson):
+    # 地图按事件类型上色；标签不能一律画成"武装冲突"的粉色
+    message = {"role": "assistant", "content": "已统计。", "geojson": [geojson("explosions", [EXPLOSION])]}
+    app = AppTest.from_function(_chips_page, args=(message, "light"), default_timeout=20).run()
+
+    assert not app.exception
+    assert "background:#EA580C" in _chips(app)
+
+
+def test_result_chip_for_non_acled_points_is_an_outlined_ring(geojson):
+    message = {"role": "assistant", "content": "已查询。", "geojson": [geojson("gdelt", [GDELT_POINT])]}
+    app = AppTest.from_function(_chips_page, args=(message, "light"), default_timeout=20).run()
+
+    assert not app.exception
+    assert 'class="ring"' in _chips(app)
+
+
+def test_chips_with_the_same_name_in_one_answer_are_numbered(store, geojson):
+    # 一次回答做两个缓冲区：图层按钮按"同轮重名"规则编号，结果标签照抄同样的名字
+    first, second = geojson("north", [BUFFER]), geojson("south", [BUFFER])
+    sid = _session(store, [[first, second]])
+    app = _open(_app(), sid)
+
+    options = app.pills[0].options
+    assert len(set(options)) == 2  # 两个按钮不能重名
+    chips = next(str(item.value) for item in app.chat_message[1].markdown if "gs-results" in str(item.value))
+    assert all(option in chips for option in options)
+
+
+def test_result_chips_use_the_same_names_as_the_layer_buttons(store, geojson):
+    # 两轮都生成"缓冲区 150 km"：图层按钮会加"第 N 轮"，回答下的标签必须一字不差
+    first, second = geojson("north", [BUFFER]), geojson("south", [BUFFER])
+    sid = _session(store, [[first], [second]])
+    app = _open(_app(), sid)
+
+    assert app.pills[0].options == ["缓冲区 150 km · 第 1 轮", "缓冲区 150 km · 第 2 轮"]
+    chips = [str(item.value) for item in app.chat_message[1].markdown if "gs-results" in str(item.value)]
+    assert len(chips) == 1
+    assert "缓冲区 150 km · 第 1 轮" in chips[0]

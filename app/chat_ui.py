@@ -133,32 +133,51 @@ def render_process(message: dict) -> None:
                 st.code(str(step), language="text")
 
 
-def _swatch(kind: str, mode: str) -> str:
+def _swatch(kind: str, features: list, mode: str) -> str:
+    """色块要和地图上看到的那个颜色一致：事件点按首个事件类型取色，
+    非 ACLED 的普通点是空心环，不能都画成"武装冲突"的粉色。"""
     colors = palette.MAP[mode]
     if kind == "buffer":
         return f'<i class="ring" style="border-color:{colors["buffer"]}"></i>'
     if kind == "track":
         return f'<i class="line" style="background:{colors["track"]}"></i>'
     if kind == "events":
-        return f'<i class="dot" style="background:{palette.EVENT_COLORS["Battles"]}"></i>'
+        # 地图把非 ACLED 的取值画成空心环（map_view.layer.typed 也要求全部是 ACLED 类型）
+        if not all((item.get("properties") or {}).get("event_type") in palette.ACLED_TYPES for item in features):
+            return f'<i class="ring" style="border-color:{colors["ring"]}"></i>'
+        event_type = (features[0].get("properties") or {}).get("event_type")
+        return f'<i class="dot" style="background:{palette.event_color(event_type, mode)}"></i>'
     return f'<i class="ring" style="border-color:{colors["ring"]}"></i>'
 
 
-def result_chips(message: dict, mode: str) -> None:
-    """本轮产生的图层：名称与图层按钮一致，色块与地图同色。"""
-    chips = []
-    for path in message.get("geojson") or []:
+def _layers(message: dict, labels: dict | None) -> list[tuple[str, list, str]]:
+    """本轮产生的图层 [(种类, 要素, 名称)]。labels 是图层栏实际用的名称（{(路径, 种类): 名称}），
+    有就照抄，保证标签和按钮一字不差；没有图层栏时（单独渲染一条消息）按同样的命名规则现算。"""
+    paths = list(dict.fromkeys(message.get("geojson") or []))
+    if labels is None:
+        labels = {(layer.path, layer.kind): layer.label for layer in map_view.build([(1, paths)]).layers}
+    groups = []
+    for path in paths:
         try:
             data = map_view.load(path)
         except artifacts.ArtifactError:
             continue
         for kind, features in map_view.split(data):
-            chips.append(f'<span class="gs-result">{_swatch(kind, mode)}{html.escape(map_view.layer_label(kind, features))}</span>')
+            label = labels.get((path, kind)) or map_view.layer_label(kind, features)
+            groups.append((kind, features, label))
+    return groups
+
+
+def result_chips(message: dict, mode: str, labels: dict | None = None) -> None:
+    """本轮产生的图层：名称与图层按钮一致，色块与地图同色。"""
+    chips = [f'<span class="gs-result">{_swatch(kind, features, mode)}{html.escape(label)}</span>'
+             for kind, features, label in _layers(message, labels)]
     if chips:
         st.markdown(f'<div class="gs-results">{"".join(chips)}</div>', unsafe_allow_html=True)
 
 
-def render_message(message: dict, mode: str, *, interrupted: bool = False, busy: bool = False) -> None:
+def render_message(message: dict, mode: str, *, interrupted: bool = False, busy: bool = False,
+                   labels: dict | None = None) -> None:
     is_user = message.get("role") == "user"
     with st.chat_message("user" if is_user else "assistant", avatar="user" if is_user else ASSISTANT_AVATAR):
         content = message.get("content") or "本轮没有生成回答。"
@@ -171,6 +190,6 @@ def render_message(message: dict, mode: str, *, interrupted: bool = False, busy:
             return
         render_process(message)
         st.markdown(clean_assistant_text(content))
-        result_chips(message, mode)
+        result_chips(message, mode, labels)
         if message.get("error"):
             st.caption("本轮分析未完成，可调整问题后重试。")

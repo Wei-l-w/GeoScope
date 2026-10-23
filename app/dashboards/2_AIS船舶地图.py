@@ -6,7 +6,10 @@ import pandas as pd
 import pydeck as pdk
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+ROOT = str(Path(__file__).resolve().parents[2])
+if ROOT in sys.path:  # 每次 rerun 都会重跑本文件；Streamlit 还会把它自己插入的脚本路径留在表头
+    sys.path.remove(ROOT)  # 先移除再插回，表头始终是本仓库，也不会随 rerun 越积越多
+sys.path.insert(0, ROOT)
 from app import palette, ui  # noqa: E402
 from app.db import query  # noqa: E402
 

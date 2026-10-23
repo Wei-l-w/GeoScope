@@ -49,15 +49,19 @@ subtitle = "分析中…" if busy else (f"{len(messages)} 条消息" if messages
 with header_slot:
     chat_ui.header(title, subtitle, sid, busy)
 
+# 先算出图层，回答末尾的结果标签才能照抄图层按钮的名字（含"第 N 轮"）；只读数据，不出界面。
+turn_paths = map_view.turns(messages)
+state = map_view.build(turn_paths, map_view.reset_count())
+labels = {(layer.path, layer.kind): layer.label for layer in state.layers}
+
 interrupted = chat_ui.unanswered(messages)
 with history:
     if not messages and not busy:
         chat_ui.welcome(busy)
     for message in messages:
-        chat_ui.render_message(message, mode, interrupted=message.get("seq") in interrupted, busy=busy)
+        chat_ui.render_message(message, mode, interrupted=message.get("seq") in interrupted, busy=busy,
+                               labels=labels)
 
-turn_paths = map_view.turns(messages)
-state = map_view.build(turn_paths, map_view.reset_count())
 with bar_slot:
     visible = map_view.render_bar(state, sid, busy)
 last_error = next((m.get("error") for m in reversed(messages) if m.get("role") == "assistant"), None)
