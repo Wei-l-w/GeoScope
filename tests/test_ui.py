@@ -9,7 +9,7 @@ from streamlit.testing.v1 import AppTest
 
 from app import ui
 
-DASHBOARDS = Path(__file__).resolve().parents[1] / "app" / "pages"
+DASHBOARDS = Path(__file__).resolve().parents[1] / "app" / "dashboards"
 # 换皮前写死在页面里的霓虹色、旧接口和旧文案
 LEGACY = ("#22d3ee", "#fbbf24", "#f87171", "#a78bfa", "#34d399", "#60a5fa", "#f472b6", "#fb923c",
           "accent=", "use_container_width", "\nimport ui\n", "from db import", "（默认全部）", "GeoAgent",

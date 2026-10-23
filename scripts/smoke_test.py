@@ -11,7 +11,7 @@ from unittest.mock import patch
 from streamlit.testing.v1 import AppTest
 
 ROOT = Path(__file__).resolve().parents[1]
-PAGES = [ROOT / "app" / "GeoAgent.py"] + sorted((ROOT / "app" / "pages").glob("*.py"))
+PAGES = [ROOT / "app" / "GeoAgent.py"] + sorted((ROOT / "app" / "dashboards").glob("*.py"))
 
 
 def main() -> int:
