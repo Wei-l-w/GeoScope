@@ -100,14 +100,16 @@ def coordinate_bounds(data: dict) -> tuple[float, float, float, float]:
 
 
 def longitude_extent(features: list[dict]) -> tuple[float, float]:
-    """经度的覆盖区间：取经度排序后最大空隙的另一侧，跨日界线时右端可超过 180。
-    coordinate_bounds 只做最小/最大，一对 ±179° 的点会被算成覆盖整圈。"""
+    """经度的覆盖区间：最大空隙超过半圈时（一对 ±179° 的点就是这样，coordinate_bounds
+    的最小/最大会把它算成覆盖整圈），改取空隙另一侧的短弧，右端可超过 180。
+    最大空隙不超过半圈时数据本身就散在半个地球以上，此时普通的最小/最大更符合直觉，
+    缩放也已经是 2 级，两者没有实际差别。"""
     values = sorted({lon for feature in features for lon, _ in _geometry_positions(feature.get("geometry"))})
     if not values:
         raise ArtifactError("地图结果为空，没有可显示的几何图层。")
     gaps = [((values[(index + 1) % len(values)] - values[index]) % 360, index) for index in range(len(values))]
     gap, seam = max(gaps)
-    if gap <= 180:  # 覆盖不超过半个地球，普通区间即可
+    if gap <= 180:  # 数据散在半个地球以上：用普通的最小/最大，中心取数据的普通中点
         return values[0], values[-1]
     start = (seam + 1) % len(values)
     return values[start], values[seam] + (360 if seam < start else 0)

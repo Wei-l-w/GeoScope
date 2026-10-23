@@ -75,6 +75,21 @@ def test_point_rows_with_an_mmsi_column_are_query_results_not_tracks(geojson):
     assert [layer.type for layer in map_view.deck_layers(state.layers, _all(state), "light")] == ["ScatterplotLayer"]
 
 
+def test_point_rows_are_not_tracks_just_because_a_column_is_named_points_total(geojson):
+    # SQL 别名同样会变成属性；ship_track 的单点输出同时带 points_total 与 points_shown
+    rows = [_feature("Point", [43.0, 12.0], mmsi="600000000", points_total="500")]
+    state = map_view.build([(1, [geojson("alias", rows)])])
+    assert [layer.kind for layer in state.layers] == ["points"]
+
+
+def test_polygons_with_an_mmsi_property_are_not_tracks(geojson):
+    # 回归：查出带 mmsi 的船舶区域面时，曾按航迹渲染并 IndexError
+    area = _feature("Polygon", _square(43.3, 12.6, 1.0), mmsi=668116204, points_total=3, points_shown=3)
+    state = map_view.build([(1, [geojson("ship_area", [area])])])
+    assert [layer.kind for layer in state.layers] == ["other"]
+    assert [layer.type for layer in map_view.deck_layers(state.layers, _all(state), "light")] == ["GeoJsonLayer"]
+
+
 def test_single_point_track_stays_a_track(geojson):
     one = _feature("Point", [40.0, 18.0], mmsi=1, points_total=1, points_shown=1)
     state = map_view.build([(1, [geojson("track_one", [one])])])

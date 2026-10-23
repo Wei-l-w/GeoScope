@@ -86,8 +86,12 @@ def _kind(feature: dict) -> str:
         return "buffer"
     if shape == "Point" and "event_type" in props:
         return "events"
-    if "mmsi" in props and (shape == "LineString" or "points_total" in props):
-        return "track"  # ship_track 的两种输出：多点线，或只有 1 个点
+    # query_database 把 SQL 列名原样写成属性，只看 mmsi 会把 AIS 点集当成航迹。
+    # ship_track 的单点输出同时带 points_total 与 points_shown，两个都在才算。
+    if shape == "LineString" and "mmsi" in props:
+        return "track"
+    if shape == "Point" and "mmsi" in props and "points_total" in props and "points_shown" in props:
+        return "track"  # ship_track 只有 1 个点时的输出
     if shape in ("Point", "MultiPoint"):
         return "points"
     return "other"
