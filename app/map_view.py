@@ -309,6 +309,9 @@ def render_bar(state: MapState, sid: str | None, busy: bool) -> set:
                         help="下载 GeoJSON"):
             for index, (turn, path, summary) in enumerate(state.files):
                 file = Path(path)
+                if not file.is_file():  # 构建之后被删掉：给出说明，别留一个点了才报错的按钮
+                    st.caption(f"{summary} · 第 {turn} 轮 · {file.name}（文件已不可用）")
+                    continue
                 st.download_button(f"{summary} · 第 {turn} 轮 · {file.name}", lambda path=path: Path(path).read_bytes(),
                                    file_name=file.name, mime="application/geo+json",
                                    key=f"geoagent_download_{index}", on_click="ignore", width="stretch")

@@ -1,6 +1,7 @@
 """工作台地图图层的单元测试：拆分、命名、配色归并、视野与复位（设计文档第 7 节）。"""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -201,3 +202,25 @@ def test_reset_nudges_every_view_field(geojson):
     assert (base.pitch, base.bearing) == (0, 0)
     for name in ("latitude", "longitude", "zoom", "pitch", "bearing"):
         assert getattr(moved, name) == pytest.approx(getattr(base, name) + 2e-7, abs=1e-12)
+
+
+def test_download_list_skips_files_that_have_since_been_deleted(geojson, tmp_path):
+    from streamlit.testing.v1 import AppTest
+
+    gone = geojson("gone", [BUFFER])
+    page = tmp_path / "page.py"
+    page.write_text(
+        "import sys\n"
+        f"sys.path.insert(0, {str(Path(__file__).resolve().parents[1])!r})\n"
+        "from pathlib import Path\n"
+        "import streamlit as st\n"
+        "from app import map_view\n"
+        f"state = map_view.build([(1, [{gone!r}])])\n"
+        "Path(" + f"{gone!r}" + ").unlink()\n"
+        "map_view.render_bar(state, 'sid', False)\n",
+        encoding="utf-8",
+    )
+    app = AppTest.from_file(str(page), default_timeout=20).run()
+    assert not app.exception
+    assert not app.get("download_button")
+    assert "文件已不可用" in " ".join(caption.value for caption in app.caption)
