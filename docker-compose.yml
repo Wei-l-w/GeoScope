@@ -1,8 +1,23 @@
+name: geoscope
+
 services:
   app:
     build: .
+    image: geoscope-agent:latest
+    container_name: geoscope-agent
     ports:
       - "8501:8501"
     volumes:
-      - ./data:/srv/app/data
+      - ./data:/srv/app/data          # 数据仓库与会话库在宿主机持久化
+    env_file:
+      - .env                          # OPENAI_API_KEY / OPENAI_BASE_URL / MODEL_NAME
+    environment:
+      TZ: Asia/Shanghai
+      WAREHOUSE_PATH: /srv/app/data/warehouse.duckdb
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     restart: unless-stopped

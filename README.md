@@ -15,7 +15,11 @@
 | ![缓冲区分析](docs/demo-buffer.gif) | ![船舶航迹](docs/demo-track.gif) | ![知识库问答](docs/demo-rag.gif) |
 | "曼德海峡周边 150km 内发生了多少起事件？" | "MMSI 668116204 最近 30 天走了什么路线？" | "银河领袖号事件有什么背景？" |
 
-运行效果：左栏流式展示 Agent 的"思考 → 调用工具 → 返回结果"全过程（类 Claude Code），右栏地图在几何结果产出的瞬间即时渲染（缓冲区圆 / 事件点 / 航迹线）。
+对话工作台：左侧聊天独立滚动，输入区留在面板底部；用户消息与分析回答分层展示，工具明细默认收在“分析过程”中。右侧地图随几何结果即时更新，窄屏下改为上下布局。
+
+示例问题先填入可编辑草稿，确认发送后才开始分析。侧栏保留会话恢复与记忆查看，错误回复会保存并明确标记为未完成。地图结果提供 GeoJSON 下载。界面支持深浅主题，要求 Streamlit 1.52 及以上。
+
+地图只接收实际工具生成、通过路径与几何校验的本地 GeoJSON。明确上图请求若没有真实产物，会要求模型实际执行一次，仍未生成则报告失败；文件缺失/损坏会显示原因。合法的零事件缓冲区仍显示范围，查看上次有效地图可直接恢复，无需额外模型调用。
 
 ## 架构
 
@@ -83,7 +87,15 @@ python -m agent.chat "曼德海峡周边150公里内有哪些高风险事件？"
 python -m agent.chat --direct --csv result.csv "苏伊士运河区域的油轮统计"
 ```
 
-Docker 部署：`docker compose up -d --build`，访问 `http://localhost:8501`。
+Docker 部署（`.env` 需已配置，compose 通过 `env_file` 注入；数据目录以 volume 挂载，不入镜像）：
+
+```bash
+docker compose up -d --build     # 首次构建约 5 分钟
+docker compose ps                # 状态应为 Up (healthy)
+# 访问 http://localhost:8501
+```
+
+`.dockerignore` 已排除 `.env`/`.git`/`data/` 等，避免密钥与数据进入镜像层。
 
 ## GeoSQL 评测（可复现）
 
