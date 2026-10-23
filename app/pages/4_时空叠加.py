@@ -5,11 +5,12 @@ import pandas as pd
 import pydeck as pdk
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import ui
-from db import query
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app import palette, ui  # noqa: E402
+from app.db import query  # noqa: E402
 
-ui.setup("时空叠加", accent="#f472b6")
+ui.setup("时空叠加")
+mode = ui.mode()
 ui.page_header(
     "红海危机 · 时空叠加分析",
     "AIS 船舶轨迹叠加 ACLED 危机事件（按 AIS 关联层级着色）· 观察袭击事件与航运动态的时空关联",
@@ -32,15 +33,18 @@ REGIONS = {
     "全球": (20.0, 60.0, None),
 }
 
+# AIS 关联层级是有序类别：C → B → A 支撑 → A 直接，单一红色由浅到深（深色主题由暗到亮）
+_TIER_RAMP = dict(zip(("tier_C_context", "tier_B_signal", "tier_A_enabling", "tier_A_direct"),
+                      (palette.rgb(c) for c in palette.ordinal(4, mode))))
 TIER_STYLE = {
-    "tier_A_direct": ("A级·直接相关", [248, 113, 113]),
-    "tier_A_enabling": ("A级·支撑行动", [251, 146, 60]),
-    "tier_B_signal": ("B级·信号事件", [251, 191, 36]),
-    "tier_C_context": ("C级·背景事件", [100, 116, 139]),
+    "tier_A_direct": ("A级·直接相关", _TIER_RAMP["tier_A_direct"]),
+    "tier_A_enabling": ("A级·支撑行动", _TIER_RAMP["tier_A_enabling"]),
+    "tier_B_signal": ("B级·信号事件", _TIER_RAMP["tier_B_signal"]),
+    "tier_C_context": ("C级·背景事件", _TIER_RAMP["tier_C_context"]),
 }
 
 with st.sidebar:
-    st.header("筛选")
+    st.subheader("筛选")
     region = st.selectbox("关注区域", list(REGIONS.keys()))
     d1, d2 = st.date_input("日期范围", (tmin, tmax))
     show_ais = st.checkbox("AIS 船舶轨迹", True)
@@ -49,7 +53,7 @@ with st.sidebar:
         "ACLED · AIS 关联层级",
         list(TIER_STYLE.keys()),
         default=["tier_A_direct", "tier_A_enabling", "tier_B_signal"],
-        format_func=lambda t: TIER_STYLE[t][0],
+        format_func=lambda t: TIER_STYLE[t][0], placeholder="全部",
         help="A级=直接影响航运的事件，默认隐藏纯背景类事件",
     )
     show_gdelt = st.checkbox("GDELT 背景事件", False)
@@ -84,7 +88,7 @@ if show_ais:
         (str(d1), str(d2) + " 23:59:59", str(d1), str(d2) + " 23:59:59"),
     )
     kpis.append(("AIS 位置点（抽稀后）", f"{len(ais):,}",
-                 f"{ais['mmsi'].nunique() if len(ais) else 0} 艘活跃船舶", "#22d3ee"))
+                 f"{ais['mmsi'].nunique() if len(ais) else 0} 艘活跃船舶", palette.SOURCE["ais"]))
     if not ais.empty:
         paths = (
             ais.groupby(["mmsi", "ship_name"])
@@ -113,7 +117,7 @@ if show_gdelt:
         (str(d1), str(d2)),
     )
     kpis.append(("GDELT 事件", f"{len(gdelt):,}",
-                 f"平均 Goldstein {gdelt['goldstein'].mean():+.1f}" if len(gdelt) else "无", "#fbbf24"))
+                 f"平均 Goldstein {gdelt['goldstein'].mean():+.1f}" if len(gdelt) else "无", palette.SOURCE["gdelt"]))
     if not gdelt.empty:
         layers.append(
             pdk.Layer(
@@ -143,9 +147,9 @@ if show_acled:
     )
     tier_a = int(acled["ais_tier"].str.startswith("tier_A").sum()) if len(acled) else 0
     kpis.append(("ACLED 危机事件", f"{len(acled):,}",
-                 f"A级直接相关 {tier_a} 起", "#f87171"))
+                 f"A级直接相关 {tier_a} 起", palette.SOURCE["acled"]))
     if not acled.empty:
-        acled["color"] = acled["ais_tier"].map(lambda t: TIER_STYLE.get(t, ("", [148, 163, 184]))[1])
+        acled["color"] = acled["ais_tier"].map(lambda t: TIER_STYLE.get(t, ("", palette.rgb(palette.OTHER_GRAY[mode])))[1])
         acled["tier_cn"] = acled["ais_tier"].map(lambda t: TIER_STYLE.get(t, (t, None))[0])
         layers.append(
             pdk.Layer(
@@ -168,9 +172,12 @@ if not layers:
     st.warning("当前筛选下没有可显示的数据")
     st.stop()
 
+# 区域按查询范围定位；全球视图低于 fit_bounds 的最小缩放，单独处理
+lat, lon, zoom = (lat0, lon0, 1.8) if radius is None else ui.fit_bounds(
+    lon0 - radius, lat0 - radius, lon0 + radius, lat0 + radius, viewport=(1100, 620))
 ui.deck(
     layers,
-    lat=lat0, lon=lon0, zoom=5 if radius else 1.8,
+    lat=lat, lon=lon, zoom=zoom,
     tooltip="{ship_name}{event_type}{actor1}",
     height=620,
 )

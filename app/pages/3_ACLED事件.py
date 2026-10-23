@@ -6,11 +6,12 @@ import plotly.express as px
 import pydeck as pdk
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import ui
-from db import query
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app import palette, ui  # noqa: E402
+from app.db import query  # noqa: E402
 
-ui.setup("ACLED 红海危机事件", accent="#f87171")
+ui.setup("ACLED 事件")
+mode = ui.mode()
 ui.page_header(
     "ACLED 红海危机事件",
     "LLM 筛选增强版 · 危机阶段 / 风险等级 / 因果角色 / AIS 关联层级 / 咽喉要道 全维度标注",
@@ -29,11 +30,8 @@ PHASE_LABELS = {
     "trigger_chain": "触发链",
     "maritime_crisis": "海上危机期",
 }
-PHASE_COLORS = {
-    "precursor": [96, 165, 250],
-    "trigger_chain": [251, 191, 36],
-    "maritime_crisis": [248, 113, 113],
-}
+# 危机阶段是有序类别：单一红色由浅到深（深色主题由暗到亮）
+PHASE_COLORS = dict(zip(PHASE_LABELS, (palette.rgb(c) for c in palette.ordinal(3, mode))))
 CAUSAL_LABELS = {
     "direct_maritime_attack": "直接海上袭击",
     "coalition_response": "联军回应",
@@ -50,27 +48,27 @@ TIER_LABELS = {
 DOMAIN_LABELS = {"maritime": "海上", "air": "空中", "land": "陆上"}
 
 with st.sidebar:
-    st.header("筛选")
+    st.subheader("筛选")
     d1, d2 = st.date_input("日期范围", (dmin, dmax), min_value=dmin, max_value=dmax)
     sel_phase = st.multiselect(
-        "危机阶段（默认全部）", list(PHASE_LABELS.keys()),
-        format_func=lambda x: PHASE_LABELS.get(x, x),
+        "危机阶段", list(PHASE_LABELS.keys()),
+        format_func=lambda x: PHASE_LABELS.get(x, x), placeholder="全部",
     )
     risk_range = st.slider("风险等级", 1, 5, (1, 5))
     sel_causal = st.multiselect(
-        "危机因果角色（默认全部）", list(CAUSAL_LABELS.keys()),
-        format_func=lambda x: CAUSAL_LABELS.get(x, x),
+        "危机因果角色", list(CAUSAL_LABELS.keys()),
+        format_func=lambda x: CAUSAL_LABELS.get(x, x), placeholder="全部",
     )
     sel_tier = st.multiselect(
-        "AIS 关联层级（默认全部）", list(TIER_LABELS.keys()),
-        format_func=lambda x: TIER_LABELS.get(x, x),
+        "AIS 关联层级", list(TIER_LABELS.keys()),
+        format_func=lambda x: TIER_LABELS.get(x, x), placeholder="全部",
     )
     sel_domain = st.multiselect(
-        "事件域（默认全部）", list(DOMAIN_LABELS.keys()),
-        format_func=lambda x: DOMAIN_LABELS.get(x, x),
+        "事件域", list(DOMAIN_LABELS.keys()),
+        format_func=lambda x: DOMAIN_LABELS.get(x, x), placeholder="全部",
     )
     countries = query("SELECT DISTINCT country FROM acled_events ORDER BY 1")
-    sel_countries = st.multiselect("国家（默认全部）", countries["country"].tolist())
+    sel_countries = st.multiselect("国家", countries["country"].tolist(), placeholder="全部")
     only_kinetic = st.checkbox("仅动能事件")
     only_vessel = st.checkbox("仅船舶目标事件")
 
@@ -114,10 +112,12 @@ ui.kpi_row([
      f"动能事件 {int(df['is_kinetic'].sum())} 起"),
 ])
 
-df["color"] = df["phase"].map(lambda p: PHASE_COLORS.get(p, [148, 163, 184]))
+df["color"] = df["phase"].map(lambda p: PHASE_COLORS.get(p, palette.rgb(palette.OTHER_GRAY[mode])))
 df["phase_cn"] = df["phase"].map(PHASE_LABELS).fillna("未知")
 df["causal_cn"] = df["causal_role"].map(CAUSAL_LABELS).fillna(df["causal_role"])
 
+lat, lon, zoom = ui.fit_bounds(df["lon"].min(), df["lat"].min(), df["lon"].max(), df["lat"].max(),
+                               viewport=(1100, 540))
 ui.deck(
     [
         pdk.Layer(
@@ -130,7 +130,7 @@ ui.deck(
             pickable=True,
         )
     ],
-    lat=df["lat"].mean(), lon=df["lon"].mean(), zoom=4.2,
+    lat=lat, lon=lon, zoom=zoom,
     tooltip="{phase_cn} · 风险{risk_level}级\n{event_type} / {sub_event_type}\n{location}, {country} · {event_date}\n因果角色: {causal_cn}\n咽喉要道: {chokepoint}",
     height=540,
 )
@@ -147,6 +147,7 @@ with left:
     fig = px.bar(weekly, x="week", y="事件数", color="phase_cn", barmode="stack",
                  color_discrete_map={PHASE_LABELS[p]: f"rgb({c[0]},{c[1]},{c[2]})"
                                      for p, c in PHASE_COLORS.items()},
+                 category_orders={"phase_cn": list(PHASE_LABELS.values())},
                  labels={"week": "周", "phase_cn": "阶段"})
     ui.chart(fig, height=320)
 with right:
@@ -154,7 +155,7 @@ with right:
     causal = df["causal_cn"].value_counts().reset_index()
     causal.columns = ["因果角色", "事件数"]
     fig = px.bar(causal, x="事件数", y="因果角色", orientation="h")
-    fig.update_traces(marker_color="#f87171")
+    fig.update_traces(marker_color=palette.SOURCE["acled"])
     fig.update_yaxes(autorange="reversed")
     ui.chart(fig, height=320)
 
@@ -168,14 +169,18 @@ with c1:
     )
     choke["平均距离_km"] = choke["平均距离_km"].round(0)
     fig = px.bar(choke, x="chokepoint", y="事件数", hover_data=["平均距离_km"])
-    fig.update_traces(marker_color="#fbbf24")
+    fig.update_traces(marker_color=palette.SOURCE["acled"])
     fig.update_layout(xaxis_title=None)
     ui.chart(fig, height=280)
 with c2:
     ui.panel("AIS 关联层级")
     tier = df["ais_tier"].map(TIER_LABELS).value_counts().reset_index()
     tier.columns = ["层级", "事件数"]
-    fig = px.pie(tier, names="层级", values="事件数", hole=0.55)
+    # 关联层级同样有序：C 背景 → B 信号 → A 支撑 → A 直接
+    tier_order = [TIER_LABELS[t] for t in ("tier_C_context", "tier_B_signal", "tier_A_enabling", "tier_A_direct")]
+    fig = px.pie(tier, names="层级", values="事件数", hole=0.55, color="层级",
+                 color_discrete_map=dict(zip(tier_order, palette.ordinal(4, mode))),
+                 category_orders={"层级": tier_order})
     ui.chart(fig, height=280)
 with c3:
     ui.panel("事件域 × 动能")
@@ -184,7 +189,7 @@ with c3:
         .groupby(["域", "动能"]).size().reset_index(name="事件数")
     )
     fig = px.bar(dom, x="域", y="事件数", color="动能", barmode="group",
-                 color_discrete_map={"动能": "#f87171", "非动能": "#60a5fa"})
+                 color_discrete_map={"动能": palette.SOURCE["acled"], "非动能": palette.PALETTE[0]})
     fig.update_layout(xaxis_title=None)
     ui.chart(fig, height=280)
 
@@ -194,7 +199,7 @@ if show_all:
     full = df.drop(columns=["color", "phase_cn", "causal_cn"], errors="ignore").copy()
     full["event_date"] = pd.to_datetime(full["event_date"]).dt.date
     full = full.sort_values("event_date", ascending=False)
-    st.dataframe(full, use_container_width=True, hide_index=True, height=420)
+    st.dataframe(full, width="stretch", hide_index=True, height=420)
 else:
     detail = df[["event_date", "phase_cn", "risk_level", "causal_cn", "event_type",
                  "sub_event_type", "country", "location", "target_class", "chokepoint",
@@ -203,4 +208,4 @@ else:
     detail = detail.sort_values("event_date", ascending=False)
     detail.columns = ["日期", "阶段", "风险", "因果角色", "事件类型", "子类型", "国家",
                       "地点", "目标类型", "咽喉要道", "死亡", "描述"]
-    st.dataframe(detail, use_container_width=True, hide_index=True, height=360)
+    st.dataframe(detail, width="stretch", hide_index=True, height=360)

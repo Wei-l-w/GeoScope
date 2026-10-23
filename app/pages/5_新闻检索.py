@@ -5,13 +5,13 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import ui
-from db import query
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app import palette, ui  # noqa: E402
+from app.db import query  # noqa: E402
 
-ui.setup("新闻检索", accent="#a78bfa")
+ui.setup("新闻检索")
 ui.page_header(
-    "新闻文本检索与趋势（问背景/要结论请用 GeoAgent 页，本页适合按关键词翻原文）",
+    "新闻文本检索与趋势（问背景/要结论请用工作台，本页适合按关键词翻原文）",
     "全文关键词检索 · 报道热度时间线 · 来源结构分析",
     chips=["ACLED 原文回填", "568 篇"],
 )
@@ -61,7 +61,7 @@ with left:
         .groupby("day").size().reset_index(name="文章数")
     )
     fig = px.area(daily, x="day", y="文章数")
-    fig.update_traces(line_color="#a78bfa", fillcolor="rgba(167,139,250,.18)")
+    fig.update_traces(line_color=palette.SOURCE["news"], fillcolor="rgba(139,92,246,.18)")
     fig.update_layout(xaxis_title=None)
     ui.chart(fig, height=300)
 with right:
@@ -69,7 +69,7 @@ with right:
     src = df["source"].value_counts().head(15).reset_index()
     src.columns = ["来源", "数量"]
     fig = px.bar(src, x="数量", y="来源", orientation="h")
-    fig.update_traces(marker_color="#a78bfa")
+    fig.update_traces(marker_color=palette.SOURCE["news"])
     fig.update_yaxes(autorange="reversed")
     ui.chart(fig, height=300)
 

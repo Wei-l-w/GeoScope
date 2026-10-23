@@ -19,7 +19,7 @@ TOOL_LABELS = {
 
 
 def setup() -> None:
-    light = ui._is_light()
+    light = ui.mode() == "light"  # 过渡：任务 7 重写本文件
     palette = (
         "--chat-bg:#f3f5f8;--chat-panel:#ffffff;--chat-soft:#f7f9fb;"
         "--chat-user:#eaf4f4;--chat-line:#dfe5eb;--chat-text:#172b3a;"

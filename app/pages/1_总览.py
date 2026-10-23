@@ -1,16 +1,16 @@
 import sys
 from pathlib import Path
 
-import pandas as pd
 import plotly.express as px
 import pydeck as pdk
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import ui
-from db import query
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app import palette, ui  # noqa: E402
+from app.db import query  # noqa: E402
 
 ui.setup("总览")
+mode = ui.mode()
 ui.page_header(
     "GeoScope · 红海危机时空态势",
     "2023 下半年红海危机专题 —— AIS 船舶动态 · ACLED 危机事件（LLM 筛选增强）· 新闻原文 · GDELT 全球背景",
@@ -22,21 +22,21 @@ with st.expander("页面导航：我该用哪一页？", expanded=False):
         """
 | 页面 | 什么时候用 |
 | --- | --- |
-| **GeoAgent**（推荐入口） | 直接用大白话提问：查数、缓冲区分析、航迹查询、事件背景问答，结果自动上图 |
-| **AIS船舶地图** | 看具体船舶的航行轨迹与密度分布，按时间窗筛选 |
-| **ACLED事件** | 浏览红海危机事件清单：风险等级 / 咽喉要道 / 伤亡等多维筛选 |
+| **工作台**（推荐入口） | 直接用大白话提问：查数、缓冲区分析、航迹查询、事件背景问答，结果自动上图 |
+| **AIS 船舶** | 看具体船舶的航行轨迹与密度分布，按时间窗筛选 |
+| **ACLED 事件** | 浏览红海危机事件清单：风险等级 / 咽喉要道 / 伤亡等多维筛选 |
 | **时空叠加** | 把船舶轨迹和危机事件叠在一张图上，观察袭击与航运的时空关联 |
-| **新闻检索** | 按英文关键词全文检索报道原文（对话式问背景请直接用 GeoAgent） |
-| **GDELT事件** | 全球媒体舆情背景（非红海专题数据），用于对比全球冲突基调 |
+| **新闻检索** | 按英文关键词全文检索报道原文（对话式问背景请直接用工作台） |
+| **GDELT 背景** | 全球媒体舆情背景（非红海专题数据），用于对比全球冲突基调 |
 """
     )
 
 # ---- KPI ----
 stats = {
-    "AIS 位置点": ("ais_positions", "ts", "#22d3ee", "红海海域 88 天"),
-    "ACLED 危机事件": ("acled_events", "event_date", "#f87171", "LLM 筛选增强版"),
-    "新闻原文": ("news_articles", "published_at", "#a78bfa", "关联 ACLED 事件"),
-    "GDELT 背景事件": ("gdelt_events", "event_date", "#fbbf24", "全球背景参考"),
+    "AIS 位置点": ("ais_positions", "ts", palette.SOURCE["ais"], "红海海域 88 天"),
+    "ACLED 危机事件": ("acled_events", "event_date", palette.SOURCE["acled"], "LLM 筛选增强版"),
+    "新闻原文": ("news_articles", "published_at", palette.SOURCE["news"], "关联 ACLED 事件"),
+    "GDELT 背景事件": ("gdelt_events", "event_date", palette.SOURCE["gdelt"], "全球背景参考"),
 }
 kpis = []
 for name, (table, tcol, color, note) in stats.items():
@@ -54,23 +54,24 @@ with left:
     if pts.empty:
         st.info("暂无事件数据")
     else:
+        lat, lon, zoom = ui.fit_bounds(pts["lon"].min(), pts["lat"].min(), pts["lon"].max(), pts["lat"].max(),
+                                       viewport=(760, 480))
+        ramp = palette.sequential("red", mode)
         ui.deck(
             [
                 pdk.Layer(
                     "HeatmapLayer",
                     data=pts,
                     get_position="[lon, lat]",
-                    radius_pixels=42,
-                    color_range=[
-                        [13, 21, 38, 0], [30, 64, 120, 120], [34, 211, 238, 170],
-                        [251, 191, 36, 200], [248, 113, 113, 230], [255, 240, 220, 255],
-                    ],
+                    radius_pixels=34,
+                    intensity=4,
+                    threshold=0.02,
+                    color_range=ramp,
                 )
             ],
-            lat=18.5, lon=42.0, zoom=3.6, height=480,
+            lat=lat, lon=lon, zoom=zoom, height=480,
         )
-        ui.legend([("低热度", [30, 64, 120]), ("中热度", [34, 211, 238]),
-                   ("较高", [251, 191, 36]), ("高热度", [248, 113, 113])])
+        ui.legend([("低", ramp[1][:3]), ("中", ramp[2][:3]), ("较高", ramp[3][:3]), ("高", ramp[5][:3])])
 
 with right:
     ui.panel("危机演化（每周事件 · 按阶段）")
@@ -90,8 +91,8 @@ with right:
         st.info("暂无事件数据")
     else:
         fig = px.bar(trend, x="周", y="事件数", color="阶段", barmode="stack",
-                     color_discrete_map={"前兆期": "#60a5fa", "触发链": "#fbbf24",
-                                         "海上危机期": "#f87171"})
+                     color_discrete_map=dict(zip(["前兆期", "触发链", "海上危机期"], palette.ordinal(3, mode))),
+                     category_orders={"阶段": ["前兆期", "触发链", "海上危机期"]})
         ui.chart(fig, height=260)
 
     ui.panel("最新相关报道（ACLED 事件原文回填）")
@@ -107,7 +108,7 @@ with right:
     for _, r in news.iterrows():
         src = str(r["source"])[:36] + ("…" if len(str(r["source"])) > 36 else "")
         st.markdown(
-            f'<div class="news-item"><div class="m">{str(r["published_at"])[:10]} · {src}</div>'
+            f'<div class="gs-news"><div class="m">{str(r["published_at"])[:10]} · {src}</div>'
             f'<div class="h">{r["title"]}</div></div>',
             unsafe_allow_html=True,
         )
@@ -126,7 +127,7 @@ with b1:
     )
     if not ships.empty:
         fig = px.bar(ships, x="位置点", y="船舶", orientation="h")
-        fig.update_traces(marker_color="#22d3ee")
+        fig.update_traces(marker_color=palette.SOURCE["ais"])
         fig.update_yaxes(autorange="reversed")
         ui.chart(fig, height=300)
 with b2:
@@ -139,7 +140,7 @@ with b2:
     )
     if not by_c.empty:
         fig = px.bar(by_c, x="国家", y="事件数", color="死亡",
-                     color_continuous_scale=["#22d3ee", "#fbbf24", "#f87171"])
+                     color_continuous_scale=list(palette.SEQUENTIAL["red"][mode][1:]))
         ui.chart(fig, height=300)
 with b3:
     ui.panel("咽喉要道关联事件")
