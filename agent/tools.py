@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import math
 import time
+import uuid
 from pathlib import Path
 
 import requests
@@ -49,7 +50,7 @@ def _gazetteer_lookup(place: str) -> tuple[float, float] | None:
 
 def _save_geojson(name: str, geojson: dict) -> str:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    path = OUTPUT_DIR / f"{int(time.time())}_{name}.geojson"
+    path = OUTPUT_DIR / f"{int(time.time())}_{name}_{uuid.uuid4().hex[:12]}.geojson"
     path.write_text(json.dumps(geojson, ensure_ascii=False), encoding="utf-8")
     return str(path)
 
@@ -162,14 +163,17 @@ def ship_track(mmsi: int, days: int = 7) -> str:
         # 整数除法避免浮点边界误差；终点恰好落在最后一个间隔的起点。
         rows = con.execute(
             f"""
-            WITH ordered AS (
-                SELECT ts, lat, lon,
-                       ROW_NUMBER() OVER (ORDER BY ts, lat, lon) AS rn,
-                       COUNT(*) OVER () AS total
+            WITH candidates AS MATERIALIZED (
+                SELECT ts, lat, lon
                 FROM ais_positions
                 WHERE mmsi = ?
                   AND ts >= (SELECT MAX(ts) FROM ais_positions) - INTERVAL (?) DAY
-                  AND lat BETWEEN -90 AND 90
+            ), ordered AS (
+                SELECT ts, lat, lon,
+                       ROW_NUMBER() OVER (ORDER BY ts, lat, lon) AS rn,
+                       COUNT(*) OVER () AS total
+                FROM candidates
+                WHERE lat BETWEEN -90 AND 90
                   AND lon BETWEEN -180 AND 180
                   AND isfinite(lat) AND isfinite(lon)
             )
