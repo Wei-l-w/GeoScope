@@ -75,3 +75,16 @@ def test_text_tokens_meet_wcag_aa_on_page_and_panel(mode, token):
 @pytest.mark.parametrize("mode", palette.MODES)
 def test_text_on_primary_buttons_meets_wcag_aa(mode):
     assert contrast(TOKENS["accent-ink"][mode], TOKENS["accent"][mode]) >= 4.5
+
+
+def test_primary_button_contrast_override_excludes_disabled_buttons():
+    css = re.sub(r"/\*.*?\*/", "", (STYLES / "base.css").read_text(encoding="utf-8"), flags=re.S)
+    selectors = [
+        selector.strip()
+        for selector_list, declarations in re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+        if re.search(r"\bcolor\s*:\s*var\(--gs-accent-ink\)", declarations)
+        for selector in selector_list.split(",")
+    ]
+    assert selectors, "primary button contrast override must remain present"
+    for selector in selectors:
+        assert '[data-testid="stBaseButton-primary"]:not(:disabled)' in selector, selector

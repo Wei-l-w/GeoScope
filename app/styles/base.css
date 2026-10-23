@@ -55,8 +55,8 @@
 
 /* ---- 增强样式（设计文档 4.3 登记表）：失效时只退回原生外观 ---- */
 /* #1 深色主题下主按钮用深色字（琥珀底白字对比度只有 1.78） */
-.stApp [data-testid="stBaseButton-primary"],
-.stApp [data-testid="stBaseButton-primary"] p { color: var(--gs-accent-ink); }
+.stApp [data-testid="stBaseButton-primary"]:not(:disabled),
+.stApp [data-testid="stBaseButton-primary"]:not(:disabled) p { color: var(--gs-accent-ink); }
 /* #2 主区域留白收紧 */
 .stApp [data-testid="stMainBlockContainer"] { padding: 4rem 1.5rem 1.5rem; }
 /* #3 地图圆角描边 */
