@@ -406,11 +406,14 @@ Streamlit 的每次点击都会让脚本从头重跑，并中止正在运行的�
 | Polygon / MultiPolygon，`kind == "buffer"` | 缓冲区 | 缓冲区 {radius_km:g} km | `:material/radio_button_unchecked:` |
 | Point，带 `event_type`，所有取值都是 ACLED 类型 | ACLED 事件点（按类型着色） | 事件点 · N | `:material/scatter_plot:` |
 | Point，带 `event_type`，含非 ACLED 取值（如 GDELT 代码） | 非 ACLED 点 | 事件点 · N | `:material/scatter_plot:` |
-| LineString 或单个 Point，带 `mmsi` | 航迹 | 航迹 · {mmsi} | `:material/route:` |
+| LineString，带 `mmsi`；或同时带 `mmsi`、`points_total`、`points_shown` 的单个 Point | 航迹 | 航迹 · {mmsi} | `:material/route:` |
 | 其他 Point | 非 ACLED 点 | 查询结果 · N 点 | `:material/location_on:` |
 | 其他几何 | 中性样式 | 图层 · N 个要素 | `:material/layers:` |
 
+- 航迹不能只看 `mmsi`：`query_database` 把 SQL 列名原样写成属性，`SELECT mmsi, lat, lon` 会得到每行一个带 `mmsi` 的 Point。只看 `mmsi` 的话，2000 行的 AIS 查询会变成 2000 个 deck 图层、1.14 MB 载荷（实测），而正确分类是 1 个图层、425 KB。`ship_track` 的单点输出同时带 `points_total` 与 `points_shown`，用它当签名；只带 `points_total` 的列别名（如 `COUNT(*) AS points_total`）不算。
+- 多边形、多线等非点线几何即使带 `mmsi` 也走"其他几何"；走到航迹分支会按 `coordinates[0]` 取位置而 `IndexError`。
 - 两个图层同名时，后面加"· 第 N 轮"（N 为会话内助手回答的序号）。
+- 同一轮里仍同名时，再按出现顺序加序号："缓冲区 150 km · 第 1 轮 · 1"、"· 2"。一次回答里做两个缓冲区是可能的（同一工具最多连续调用 2 次）。
 - 缓冲区内 0 个事件时，只出圆圈图层，不出事件点按钮。
 - 图层按钮用**类型图标**区分：原生 `st.pills` 不支持给每个选项单独配色。颜色对照看地图底栏的图例和对话里的结果标签。
 
@@ -428,6 +431,7 @@ Streamlit 的每次点击都会让脚本从头重跑，并中止正在运行的�
   - 新结果到达、打开会话、刷新页面时会自动定位；
   - 切换图层开关时地图组件不重新挂载，视野保持（先拖动再切换，地图区像素变化 0.06%）。
 - **复位**按钮：在会话状态里递增一个计数，把 `计数 × 1e-7` 同时加到纬度、经度、缩放、俯仰、方位五个字段，强制 deck.gl 重置到最新结果。Streamlit 只覆盖初始视野里"变了"的字段，只改纬度会留下用户拖动后的经度与缩放（样机实测；五个字段一起改后，复位后与初始视野的像素差为 0）。
+- 经度取**跨日界线的最短弧**（`artifacts.longitude_extent`），算完再把中心折回 −180–180。直接取最小/最大会把一对 −179° / 179.5° 的点算成覆盖 358.5°，视野落到几内亚湾、缩放 2 级；取短弧后是 1.5° 范围、缩放 8 级。最大空隙不超过半圈时数据本身就散在半个地球以上，此时仍用普通的最小/最大，缩放也已经钳在 2 级，两种取法没有实际差别。
 - 计算方法：
   1. 按名义视口 720×560 像素，在 Web 墨卡托投影下分别算出经度、纬度两个方向各自需要的缩放级别，取较小值；
   2. 四周留 12% 边距；
@@ -448,12 +452,15 @@ Streamlit 的每次点击都会让脚本从头重跑，并中止正在运行的�
 - 下载
   - popover 里按**结果文件**列出（不按拆分后的图层），标签为"种类摘要 · 第 N 轮 · 文件名"。
   - 只允许下载 `data/agent_output` 内且通过校验的文件，用 `st.download_button(on_click="ignore")`。
+  - `data` 传闭包（`lambda path=path: Path(path).read_bytes()`）按需读取，避免每次重跑都把全部文件读进内存；Streamlit 1.52 起支持。
+  - 文件在构建之后被删掉的（`is_file()` 为假），列一行"（文件已不可用）"，不生成点了才报通用错误的按钮。
 - 缓存：解析并校验后的 GeoJSON 按（路径，修改时间，大小）缓存（`st.cache_data`），切换开关时不重复读盘。
 
 ### 7.6 异常（沿用现有行为）
 
 - 文件缺失或损坏：不上图，地图上方显示"地图加载失败：…"和原因。
 - 本轮失败且没有图层：显示"本轮未生成可用地图，请查看对话中的执行失败说明。"。
+- 产物结构不合法（`properties` 不是对象、属性值是嵌套结构、整数溢出等）：`load_geojson` 直接判为损坏，同样走"地图加载失败"。校验放在 `agent/artifacts.py`，看板页的读取路径一并受保护。
 
 ## 8. 看板页换皮
 

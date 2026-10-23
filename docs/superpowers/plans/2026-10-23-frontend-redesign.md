@@ -46,16 +46,18 @@
 
 ## 任务总览
 
+数字按实际实施更新：每个任务的质量复查都会补充回归测试，所以"结束时测试数"逐次增加，实施时以实际数与"全部通过"为准，不要为了凑数字改测试。
+
 | # | 任务 | 结束时测试数 |
 | --- | --- | --- |
 | 1 | 数据配色模块 | 230 |
 | 2 | 原生双主题与设计令牌 | 246 |
-| 3 | 主题监听组件 | 250 |
-| 4 | 看板公共层与 6 个看板页换皮 | 253 |
-| 5 | 地图图层模型 | 267 |
-| 6 | 路由入口与顶部导航 | 270 |
-| 7 | 工作台重做 | 281 |
-| 8 | README 与依赖 | 281 |
+| 3 | 主题监听组件 | 252 |
+| 4 | 看板公共层与 6 个看板页换皮 | 265 |
+| 5 | 地图图层模型 | 291 |
+| 6 | 路由入口与顶部导航 | 294 |
+| 7 | 工作台重做 | 305 |
+| 8 | README 与依赖 | 305 |
 | 9 | 真实分析验收（调用模型约 2 次） | — |
 | 10 | 视觉验收与 README 截图 | — |
 
@@ -1936,7 +1938,7 @@ python -m pytest tests/test_ui.py -q
 python -m pytest tests/ -q
 ```
 
-预期：通过，253 passed（旧工作台的回归测试照常通过）。
+预期：通过，265 passed（旧工作台的回归测试照常通过；实施时实测 265）。
 
 ```bash
 python scripts/smoke_test.py
@@ -1969,7 +1971,16 @@ git add app/ui.py app/chat_ui.py app/pages tests/test_ui.py && \
 
 **Files:**
 - Modify: `app/map_view.py`（整体重写，末尾保留过渡代码）
-- Test: `tests/test_map_layers.py`
+- Modify: `agent/artifacts.py`（新增 `longitude_extent`、`_check_properties`，见下方"质量复查修正"）
+- Test: `tests/test_map_layers.py`、`tests/test_map_artifacts.py`
+
+**质量复查修正**（代码已按此实现，下方代码块未逐字回改，以本节为准）：
+
+- 航迹只认 `LineString`，或同时带 `points_total` 与 `points_shown` 的 `Point`。`query_database` 把 SQL 列名原样写成属性，只看 `mmsi` 会把 AIS 点集当成航迹（每行一个 deck 图层）——实测 2000 行时图层数 2000、载荷 1.14 MB。多边形带 `mmsi` 时还会走进航迹分支并 `IndexError`。
+- 同一轮里同名的图层在"· 第 N 轮"之后再加序号：一次回答做两个缓冲区时，两个按钮原本同名。
+- 经度取跨日界线的最短弧（`artifacts.longitude_extent`），`fit_view` 再把中心折回 −180–180。原来一对 ±179° 的点会定位到全球、缩放 2 级。
+- `load_geojson` 增加属性校验：`properties` 必须是对象、值必须是简单值、整数不能溢出 `float`。原来非对象的 `properties` 会让整个页面 `AttributeError`。
+- 下载按钮的 `data` 改成闭包按需读取，文件已被删除时给一行"文件已不可用"，不留点了才报错的按钮。
 
 - [ ] **Step 1: 写测试**
 
@@ -2059,10 +2070,47 @@ def test_zero_event_buffer_has_only_the_circle_layer(geojson):
     assert [layer.kind for layer in state.layers] == ["buffer"]
 
 
+def test_point_rows_with_an_mmsi_column_are_query_results_not_tracks(geojson):
+    # query_database 把 mmsi 列也写成属性，逐行一个 Point；只看 mmsi 会把它当成航迹，每点一个图层
+    rows = [_feature("Point", [43.0 + 0.01 * index, 12.0], mmsi="600000000", speed="12.4")
+            for index in range(3)]
+    state = map_view.build([(1, [geojson("ais", rows)])])
+
+    assert [(layer.kind, layer.label) for layer in state.layers] == [("points", "查询结果 · 3 点")]
+    assert [layer.type for layer in map_view.deck_layers(state.layers, _all(state), "light")] == ["ScatterplotLayer"]
+
+
+def test_point_rows_are_not_tracks_just_because_a_column_is_named_points_total(geojson):
+    # SQL 别名同样会变成属性；ship_track 的单点输出同时带 points_total 与 points_shown
+    rows = [_feature("Point", [43.0, 12.0], mmsi="600000000", points_total="500")]
+    state = map_view.build([(1, [geojson("alias", rows)])])
+    assert [layer.kind for layer in state.layers] == ["points"]
+
+
+def test_polygons_with_an_mmsi_property_are_not_tracks(geojson):
+    # 回归：查出带 mmsi 的船舶区域面时，曾按航迹渲染并 IndexError
+    area = _feature("Polygon", _square(43.3, 12.6, 1.0), mmsi=668116204, points_total=3, points_shown=3)
+    state = map_view.build([(1, [geojson("ship_area", [area])])])
+    assert [layer.kind for layer in state.layers] == ["other"]
+    assert [layer.type for layer in map_view.deck_layers(state.layers, _all(state), "light")] == ["GeoJsonLayer"]
+
+
+def test_single_point_track_stays_a_track(geojson):
+    one = _feature("Point", [40.0, 18.0], mmsi=1, points_total=1, points_shown=1)
+    state = map_view.build([(1, [geojson("track_one", [one])])])
+    assert [(layer.kind, layer.label) for layer in state.layers] == [("track", "航迹 · 1")]
+
+
 def test_same_names_get_turn_suffix(geojson):
     first, second = geojson("buffer_a", [BUFFER]), geojson("buffer_b", [BUFFER])
     state = map_view.build([(1, [first]), (3, [second])])
     assert [layer.label for layer in state.layers] == ["缓冲区 150 km · 第 1 轮", "缓冲区 150 km · 第 3 轮"]
+
+
+def test_same_turn_layers_with_the_same_name_are_numbered(geojson):
+    first, second = geojson("buffer_a", [BUFFER]), geojson("buffer_b", [BUFFER])
+    state = map_view.build([(1, [first, second])])
+    assert [layer.label for layer in state.layers] == ["缓冲区 150 km · 第 1 轮 · 1", "缓冲区 150 km · 第 1 轮 · 2"]
 
 
 def test_file_repeated_in_later_turn_belongs_to_that_turn(geojson):
@@ -2113,6 +2161,18 @@ def test_view_fits_latest_turn_in_web_mercator(geojson):
     state = map_view.build([(1, [far]), (2, [near])])
     # 10°N–30°N 在墨卡托下比按度数算更"高"：缩放 3.80，按度数线性算会得到 3.90
     assert state.view == (20.322, 40.0, 3.8)
+
+
+def test_view_follows_the_shortest_arc_across_the_antimeridian(geojson):
+    # -179° 与 179.5° 相距 1.5°；简单取最小/最大会得到覆盖 358.5° 的"全球"视野
+    path = geojson("dateline", [_feature("Point", [-179.0, -17.0]), _feature("Point", [179.5, -17.0])])
+    assert map_view.build([(1, [path])]).view == (-17.0, -179.75, 8.0)
+
+
+def test_worldwide_points_still_fit_the_whole_map(geojson):
+    path = geojson("world", [_feature("Point", [-170.0, 0.0]), _feature("Point", [0.0, 0.0]),
+                             _feature("Point", [170.0, 0.0])])
+    assert map_view.build([(1, [path])]).view == (0.0, 0.0, 2.0)
 
 
 def test_without_layers_the_map_shows_the_red_sea():
@@ -2232,8 +2292,12 @@ def _kind(feature: dict) -> str:
         return "buffer"
     if shape == "Point" and "event_type" in props:
         return "events"
-    if shape in ("LineString", "Point") and "mmsi" in props:
+    # query_database 把 SQL 列名原样写成属性，只看 mmsi 会把 AIS 点集当成航迹。
+    # ship_track 的单点输出同时带 points_total 与 points_shown，两个都在才算。
+    if shape == "LineString" and "mmsi" in props:
         return "track"
+    if shape == "Point" and "mmsi" in props and "points_total" in props and "points_shown" in props:
+        return "track"  # ship_track 只有 1 个点时的输出
     if shape in ("Point", "MultiPoint"):
         return "points"
     return "other"
@@ -2285,6 +2349,12 @@ def build(turn_paths: list[tuple[int, list[str]]], reset: int = 0) -> MapState:
     for layer in state.layers:
         if counts[layer.label] > 1:
             layer.label = f"{layer.label} · 第 {layer.turn} 轮"
+    counts = Counter(layer.label for layer in state.layers)  # 一轮里仍同名：一次回答做了两个缓冲区
+    index: Counter = Counter()
+    for layer in state.layers:
+        if counts[layer.label] > 1:
+            index[layer.label] += 1
+            layer.label = f"{layer.label} · {index[layer.label]}"
     state.errors = list(dict.fromkeys(state.errors))
     state.view = fit_view(state.layers)
     state.reset = reset
@@ -2293,13 +2363,20 @@ def build(turn_paths: list[tuple[int, list[str]]], reset: int = 0) -> MapState:
 
 # ---------------------------------------------------------------- 视野
 def fit_view(layers: list[MapLayer]) -> tuple[float, float, float]:
-    """定位到最新一轮产出图层的范围；与图层是否隐藏无关，所以切换开关不会改变视野。"""
+    """定位到最新一轮产出图层的范围；与图层是否隐藏无关，所以切换开关不会改变视野。
+    经度取跨日界线的最短弧，再折回 -180–180，避免一对 ±179° 的点定位到全球。"""
     if not layers:
         return DEFAULT_VIEW
     latest = max(layer.turn for layer in layers)
     features = [item for layer in layers if layer.turn == latest for item in layer.features]
-    bounds = artifacts.coordinate_bounds({"type": "FeatureCollection", "features": features})
-    return ui.fit_bounds(*bounds, viewport=NOMINAL_VIEWPORT, padding=PADDING)
+    _, bottom, _, top = artifacts.coordinate_bounds({"type": "FeatureCollection", "features": features})
+    left, right = artifacts.longitude_extent(features)
+    latitude, longitude, zoom = ui.fit_bounds(left, bottom, right, top, viewport=NOMINAL_VIEWPORT, padding=PADDING)
+    if longitude > 180.0:
+        longitude -= 360.0
+    elif longitude < -180.0:
+        longitude += 360.0
+    return (latitude, longitude, zoom)
 
 
 # ---------------------------------------------------------------- 图层样式
@@ -2560,7 +2637,7 @@ def render(slot, paths: list[str], *, last_error: str | None = None) -> MapResul
 python -m pytest tests/test_map_layers.py -q
 ```
 
-预期：通过，14 passed。
+预期：通过，14 passed（质量复查后本文件共 22 条）。
 
 - [ ] **Step 5: 全量回归**
 
@@ -2568,12 +2645,12 @@ python -m pytest tests/test_map_layers.py -q
 python -m pytest tests/ -q
 ```
 
-预期：通过，267 passed。
+预期：通过，291 passed（实施时实测；原计划的 267 写在质量复查补充回归测试之前）。
 
 - [ ] **Step 6: 提交**
 
 ```bash
-git add app/map_view.py tests/test_map_layers.py && \
+git add app/map_view.py agent/artifacts.py tests/test_map_layers.py tests/test_map_artifacts.py && \
   git commit -m "feat(map): 工作台地图图层模型" -m "按要素拆分图层并在会话内累积；视野按最新一轮结果在墨卡托投影下计算；复位同时微调视野五个字段；ACLED 事件 3 色 + 其他，非 ACLED 点用中性圆环；GeoJSON 按路径、修改时间、大小缓存。旧 prepare/render 暂留给旧工作台。" -m "Co-Authored-By: Claude Code <noreply@anthropic.com>"
 ```
 
