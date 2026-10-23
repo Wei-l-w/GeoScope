@@ -54,8 +54,7 @@ if sel_names:
     mmsis = ships[ships["name"].isin(sel_names)]["mmsi"].tolist()
     conds.append(f"p.mmsi IN ({','.join(str(m) for m in mmsis)})")
 if sel_types:
-    quoted = ",".join("'" + t.replace("'", "''") + "'" for t in sel_types)
-    conds.append(f"s.ship_type IN ({quoted})")
+    conds.append(ui.in_list("s.ship_type", sel_types))
 where = " AND ".join(conds)
 
 BASE = f"""
@@ -114,7 +113,7 @@ if view_mode == "轨迹线":
             get_path="path",
             get_color="color",
             width_min_pixels=2,
-            opacity=0.75,
+            opacity=0.86,
             pickable=True,
         ),
         pdk.Layer(

@@ -32,8 +32,8 @@ if default_range[0] > default_range[1]:
 
 with st.sidebar:
     st.subheader("筛选")
-    d1, d2 = st.date_input("日期范围", default_range, min_value=dmin, max_value=dmax,
-                           help="GDELT 为全球背景数据（1920~2025），默认只看危机窗口")
+    d1, d2 = ui.date_range(st.date_input("日期范围", default_range, min_value=dmin, max_value=dmax,
+                                          help="GDELT 为全球背景数据（1920~2025），默认只看危机窗口"))
     countries = query("SELECT DISTINCT country FROM gdelt_events WHERE country IS NOT NULL ORDER BY 1")
     sel_countries = st.multiselect("国家/地区", countries["country"].tolist(), placeholder="全部")
     codes = query("SELECT DISTINCT event_code FROM gdelt_events ORDER BY 1")
@@ -43,9 +43,9 @@ with st.sidebar:
 conds = ["event_date BETWEEN ? AND ?", "goldstein BETWEEN ? AND ?"]
 params = [d1, d2, tone_range[0], tone_range[1]]
 if sel_countries:
-    conds.append("country IN (" + ",".join("'" + c + "'" for c in sel_countries) + ")")
+    conds.append(ui.in_list("country", sel_countries))
 if sel_codes:
-    conds.append("event_code IN (" + ",".join("'" + c + "'" for c in sel_codes) + ")")
+    conds.append(ui.in_list("event_code", sel_codes))
 where = " AND ".join(conds)
 
 df = query(

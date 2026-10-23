@@ -46,7 +46,7 @@ TIER_STYLE = {
 with st.sidebar:
     st.subheader("筛选")
     region = st.selectbox("关注区域", list(REGIONS.keys()))
-    d1, d2 = st.date_input("日期范围", (tmin, tmax))
+    d1, d2 = ui.date_range(st.date_input("日期范围", (tmin, tmax)))
     show_ais = st.checkbox("AIS 船舶轨迹", True)
     show_acled = st.checkbox("ACLED 危机事件", True)
     sel_tiers = st.multiselect(
@@ -100,7 +100,7 @@ if show_ais:
                 "PathLayer",
                 data=paths,
                 get_path="path",
-                get_color=ui.C_AIS + [150],
+                get_color=ui.C_AIS + [210],
                 width_min_pixels=2,
                 pickable=True,
             )
@@ -125,7 +125,7 @@ if show_gdelt:
                 data=gdelt,
                 get_position="[lon, lat]",
                 get_radius=6000,
-                get_fill_color=ui.C_GDELT + [150],
+                get_fill_color=ui.C_GDELT + [210],
                 pickable=True,
             )
         )
@@ -134,7 +134,7 @@ if show_gdelt:
 if show_acled:
     tier_cond = "1=1"
     if sel_tiers:
-        tier_cond = "ais_tier IN (" + ",".join(f"'{t}'" for t in sel_tiers) + ")"
+        tier_cond = ui.in_list("ais_tier", sel_tiers)
     acled = query(
         f"""
         SELECT event_date, event_type, sub_event_type, location, country,
@@ -149,7 +149,8 @@ if show_acled:
     kpis.append(("ACLED 危机事件", f"{len(acled):,}",
                  f"A级直接相关 {tier_a} 起", palette.SOURCE["acled"]))
     if not acled.empty:
-        acled["color"] = acled["ais_tier"].map(lambda t: TIER_STYLE.get(t, ("", palette.rgb(palette.OTHER_GRAY[mode])))[1])
+        _unknown = palette.rgb(palette.OTHER_GRAY[mode])
+        acled["color"] = acled["ais_tier"].map(lambda t: TIER_STYLE.get(t, ("", _unknown))[1])
         acled["tier_cn"] = acled["ais_tier"].map(lambda t: TIER_STYLE.get(t, (t, None))[0])
         layers.append(
             pdk.Layer(
@@ -158,7 +159,7 @@ if show_acled:
                 get_position="[lon, lat]",
                 get_radius="3000 + risk_level * 4000",
                 get_fill_color="color",
-                opacity=0.75,
+                opacity=0.9,
                 pickable=True,
             )
         )

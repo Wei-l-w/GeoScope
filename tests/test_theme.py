@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app import palette
+from app import palette, ui
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))["theme"]
@@ -55,6 +55,15 @@ def test_categorical_colors_are_the_palette_padded_to_ten():
 def test_map_colors_follow_the_native_theme(mode):
     assert palette.MAP[mode]["buffer"] == CONFIG[mode]["primaryColor"]
     assert palette.MAP[mode]["ring"] == CONFIG[mode]["textColor"]
+
+
+@pytest.mark.parametrize("mode", palette.MODES)
+def test_map_tooltips_agree_with_native_theme(mode):
+    # deck.gl 的悬浮框由 WebGL 外层绘制，取不到 CSS 令牌，只能与原生主题保持一致
+    style, theme = ui._TOOLTIP[mode], CONFIG[mode]
+    assert style["backgroundColor"] == theme["secondaryBackgroundColor"]
+    assert style["color"] == theme["textColor"]
+    assert theme["borderColor"] in style["border"]
 
 
 @pytest.mark.parametrize("mode", palette.MODES)

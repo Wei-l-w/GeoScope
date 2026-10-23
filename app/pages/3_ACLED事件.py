@@ -49,7 +49,7 @@ DOMAIN_LABELS = {"maritime": "海上", "air": "空中", "land": "陆上"}
 
 with st.sidebar:
     st.subheader("筛选")
-    d1, d2 = st.date_input("日期范围", (dmin, dmax), min_value=dmin, max_value=dmax)
+    d1, d2 = ui.date_range(st.date_input("日期范围", (dmin, dmax), min_value=dmin, max_value=dmax))
     sel_phase = st.multiselect(
         "危机阶段", list(PHASE_LABELS.keys()),
         format_func=lambda x: PHASE_LABELS.get(x, x), placeholder="全部",
@@ -73,21 +73,17 @@ with st.sidebar:
     only_vessel = st.checkbox("仅船舶目标事件")
 
 
-def _in(col, vals):
-    return f"{col} IN (" + ",".join("'" + v.replace("'", "''") + "'" for v in vals) + ")"
-
-
 conds, params = ["event_date BETWEEN ? AND ?", "risk_level BETWEEN ? AND ?"], [d1, d2, *risk_range]
 if sel_phase:
-    conds.append(_in("phase", sel_phase))
+    conds.append(ui.in_list("phase", sel_phase))
 if sel_causal:
-    conds.append(_in("causal_role", sel_causal))
+    conds.append(ui.in_list("causal_role", sel_causal))
 if sel_tier:
-    conds.append(_in("ais_tier", sel_tier))
+    conds.append(ui.in_list("ais_tier", sel_tier))
 if sel_domain:
-    conds.append(_in("domain", sel_domain))
+    conds.append(ui.in_list("domain", sel_domain))
 if sel_countries:
-    conds.append(_in("country", sel_countries))
+    conds.append(ui.in_list("country", sel_countries))
 if only_kinetic:
     conds.append("is_kinetic")
 if only_vessel:
@@ -112,7 +108,8 @@ ui.kpi_row([
      f"动能事件 {int(df['is_kinetic'].sum())} 起"),
 ])
 
-df["color"] = df["phase"].map(lambda p: PHASE_COLORS.get(p, palette.rgb(palette.OTHER_GRAY[mode])))
+_unknown = palette.rgb(palette.OTHER_GRAY[mode])
+df["color"] = df["phase"].map(lambda p: PHASE_COLORS.get(p, _unknown))
 df["phase_cn"] = df["phase"].map(PHASE_LABELS).fillna("未知")
 df["causal_cn"] = df["causal_role"].map(CAUSAL_LABELS).fillna(df["causal_role"])
 
@@ -126,7 +123,7 @@ ui.deck(
             get_position="[lon, lat]",
             get_radius="4000 + risk_level * 5000",
             get_fill_color="color",
-            opacity=0.6,
+            opacity=0.9,
             pickable=True,
         )
     ],

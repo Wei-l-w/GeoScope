@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import math
+import re
 from pathlib import Path
 
 import pydeck as pdk
@@ -30,6 +31,28 @@ _TOOLTIP = {
 }
 _TOOLTIP_BASE = {"fontSize": "12px", "borderRadius": "8px", "padding": "8px 10px",
                  "boxShadow": "0 8px 24px rgba(0, 0, 0, .18)"}
+
+_COLOR = re.compile(r"#[0-9A-Fa-f]{6}\Z")
+
+
+def _css_color(value) -> str:
+    """只接受 #RRGGBB；不接受任意 CSS，避免拼进 style 属性。"""
+    if isinstance(value, str) and _COLOR.match(value):
+        return value
+    raise ValueError(f"颜色必须是 #RRGGBB：{value!r}")
+
+
+def in_list(column: str, values) -> str:
+    """把取值列表拼成 IN 子句；单引号按 SQL 规则双写。调用方负责保证 values 非空。"""
+    return f"{column} IN (" + ",".join("'" + str(v).replace("'", "''") + "'" for v in values) + ")"
+
+
+def date_range(values) -> tuple:
+    """st.date_input 的范围模式在只选了单天时只返回 1 个值。"""
+    values = tuple(values)
+    if not values:
+        raise ValueError("日期范围为空")
+    return values[0], values[-1]
 
 
 def inject_css(*names: str) -> None:
@@ -63,8 +86,12 @@ def _mercator(lat: float) -> float:
 def fit_bounds(left: float, bottom: float, right: float, top: float,
                viewport: tuple[int, int] = (720, 560), padding: float = 0.12) -> tuple[float, float, float]:
     """(纬度, 经度, 缩放)：按名义视口在 Web 墨卡托投影下分别算出经纬两向需要的缩放，
-    取较小值并留边距，限制在 2–9 级；极小范围用 7 级。中心取经纬度算术中点。"""
-    width, height = viewport
+    取较小值并留边距，限制在 2–9 级；极小范围用 7 级。纬度中心取墨卡托中点，
+    经度取算术中点，四边边距因此相等。"""
+    if not all(math.isfinite(value) for value in (left, bottom, right, top)):
+        return (0.0, 0.0, 2.0)
+    width, height = max(viewport[0], 1), max(viewport[1], 1)
+    padding = max(0.0, min(0.45, padding))
     if max(right - left, top - bottom) < 0.01:
         zoom = 7.0
     else:
@@ -72,7 +99,8 @@ def fit_bounds(left: float, bottom: float, right: float, top: float,
         zoom_y = math.log2(height * (1 - 2 * padding) * 2 * math.pi
                            / (512 * max(_mercator(top) - _mercator(bottom), 1e-9)))
         zoom = min(zoom_x, zoom_y)
-    return ((bottom + top) / 2, (left + right) / 2, round(max(2.0, min(9.0, zoom)), 2))
+    centre = math.degrees(2 * math.atan(math.exp((_mercator(bottom) + _mercator(top)) / 2)) - math.pi / 2)
+    return (round(centre, 3), (left + right) / 2, round(max(2.0, min(9.0, zoom)), 2))
 
 
 def page_header(title: str, subtitle: str = "", chips: list | None = None) -> None:
@@ -80,6 +108,8 @@ def page_header(title: str, subtitle: str = "", chips: list | None = None) -> No
     tags = []
     for chip in chips or []:
         text, kind = chip if isinstance(chip, tuple) else (chip, "")
+        if kind not in ("", "live"):
+            raise ValueError(f"未知的徽章类型：{kind!r}")
         tags.append(f'<span class="gs-tag {kind}">{html.escape(str(text))}</span>')
     st.markdown(
         f'<div class="gs-header"><div><h1>{html.escape(title)}</h1><p>{html.escape(subtitle)}</p></div>'
@@ -91,19 +121,27 @@ def kpi_row(items: list) -> None:
     """items: [(标签, 数值, 说明)] 或 [(标签, 数值, 说明, "#色值")]；不给颜色时用主色。"""
     cards = []
     for item in items:
-        label, value, caption = item[0], item[1], item[2]
-        style = f' style="--kc:{item[3]}"' if len(item) > 3 else ""
+        label, value, caption = (html.escape(str(part)) for part in item[:3])
+        style = f' style="--kc:{_css_color(item[3])}"' if len(item) > 3 else ""
         cards.append(f'<div class="gs-kpi"{style}><div class="l">{label}</div>'
                      f'<div class="v">{value}</div><div class="c">{caption}</div></div>')
     st.markdown(f'<div class="gs-kpis">{"".join(cards)}</div>', unsafe_allow_html=True)
+
+
+def _rgb_color(value) -> str:
+    """只接受 3 个 0–255 的整数，避免色阶元组等结构被拼成非法 CSS。"""
+    if (isinstance(value, (list, tuple)) and len(value) == 3
+            and all(isinstance(channel, int) and 0 <= channel <= 255 for channel in value)):
+        return f"rgb({value[0]},{value[1]},{value[2]})"
+    raise ValueError(f"颜色必须是 [r, g, b]：{value!r}")
 
 
 def legend(items: list) -> None:
     """items: [(名称, [r, g, b])] 或 [(名称, "#色值")]。"""
     chips = []
     for name, color in items:
-        css = color if isinstance(color, str) else f"rgb({color[0]},{color[1]},{color[2]})"
-        chips.append(f'<span><i style="background:{css}"></i>{html.escape(name)}</span>')
+        css = _css_color(color) if isinstance(color, str) else _rgb_color(color)
+        chips.append(f'<span><i style="background:{css}"></i>{html.escape(str(name))}</span>')
     st.markdown(f'<div class="gs-legend">{"".join(chips)}</div>', unsafe_allow_html=True)
 
 

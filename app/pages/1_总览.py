@@ -1,3 +1,4 @@
+import html
 import sys
 from pathlib import Path
 
@@ -108,8 +109,9 @@ with right:
     for _, r in news.iterrows():
         src = str(r["source"])[:36] + ("…" if len(str(r["source"])) > 36 else "")
         st.markdown(
-            f'<div class="gs-news"><div class="m">{str(r["published_at"])[:10]} · {src}</div>'
-            f'<div class="h">{r["title"]}</div></div>',
+            f'<div class="gs-news"><div class="m">{html.escape(str(r["published_at"])[:10])} · '
+            f'{html.escape(src)}</div>'
+            f'<div class="h">{html.escape(str(r["title"]))}</div></div>',
             unsafe_allow_html=True,
         )
 
