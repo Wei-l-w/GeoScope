@@ -756,7 +756,7 @@ LEGACY = ("#22d3ee", "#fbbf24", "#f87171", "#a78bfa", "#34d399", "#60a5fa", "#f4
 
 def test_fit_bounds_uses_web_mercator():
     # 10°N–30°N 在墨卡托下比按度数算更"高"：缩放 3.80，按度数线性算会得到 3.90
-    assert ui.fit_bounds(30.0, 10.0, 50.0, 30.0) == (20.0, 40.0, 3.8)
+    assert ui.fit_bounds(30.0, 10.0, 50.0, 30.0) == (20.322, 40.0, 3.8)
 
 
 def test_fit_bounds_limits():
@@ -852,7 +852,8 @@ def _mercator(lat: float) -> float:
 def fit_bounds(left: float, bottom: float, right: float, top: float,
                viewport: tuple[int, int] = (720, 560), padding: float = 0.12) -> tuple[float, float, float]:
     """(纬度, 经度, 缩放)：按名义视口在 Web 墨卡托投影下分别算出经纬两向需要的缩放，
-    取较小值并留边距，限制在 2–9 级；极小范围用 7 级。中心取经纬度算术中点。"""
+    取较小值并留边距，限制在 2–9 级；极小范围用 7 级。中心取墨卡托中点（算术中点会让
+    高纬度范围的上下边距明显不等）。"""
     width, height = viewport
     if max(right - left, top - bottom) < 0.01:
         zoom = 7.0
@@ -2111,7 +2112,7 @@ def test_view_fits_latest_turn_in_web_mercator(geojson):
     near = geojson("near", [_feature("Polygon", _square(40.0, 20.0, 10.0), kind="buffer", radius_km=1000)])
     state = map_view.build([(1, [far]), (2, [near])])
     # 10°N–30°N 在墨卡托下比按度数算更"高"：缩放 3.80，按度数线性算会得到 3.90
-    assert state.view == (20.0, 40.0, 3.8)
+    assert state.view == (20.322, 40.0, 3.8)
 
 
 def test_without_layers_the_map_shows_the_red_sea():

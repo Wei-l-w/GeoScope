@@ -489,6 +489,7 @@ Streamlit 的每次点击都会让脚本从头重跑，并中止正在运行的�
   - 底图随主题；
   - 数据图层按 `ui.mode()` 选择各主题的色阶；
   - 热力图调参：`radius_pixels=34`、`intensity=4`、`threshold=0.02`。
+  - **不透明度下限**：5.2 的 2:1 对比度是按纯色验证的，叠到 Carto 底图上会被不透明度拉低。按深色底（陆地 `#0E0E0E`、水面 `#2C353C`）实测，散点不透明度 0.6 时最弱一级只有 1.50 / 1.16。散点层一律用 0.9，航迹路径用 0.86，时空叠加的数据点 alpha 不低于 210；色值本身不变。
 - **侧栏筛选**
   - 多选框加 `placeholder="全部"`，标签去掉"（默认全部）"；
   - `st.header("筛选")` 改成 `st.subheader`。
@@ -529,8 +530,11 @@ AIS 船型改为 3 类的依据（`ais_ships` 实际数据）：货船 2480 艘�
 - **保留**：`setup(title, *, watch=True)`、`page_header`、`kpi_row`、`legend`、`panel`、`deck`（不传 `map_style`，tooltip 按 `mode()` 取色）、`chart`、`style_fig`、`C_AIS` / `C_ACLED` / `C_GDELT` / `C_NEWS`（值改为数据源色）。
 - **新增**
   - `mode()`：返回本次运行中已经确定的主题，也就是 `setup()` 或工作台调用 `theme_watch.mode()` 得到的值；
-  - `fit_bounds(left, bottom, right, top, viewport, padding)`：看板页与工作台共用的视野计算（7.4）；
-  - `inject_css(*names)`、`tooltip_style()`。
+  - `fit_bounds(left, bottom, right, top, viewport, padding)`：看板页与工作台共用的视野计算（7.4）。中心取墨卡托中点——按算术中点算，30–75°N 这类范围的上边会被裁掉（样机实测上边距 −28.7 px / 280 px）；
+  - `inject_css(*names)`、`tooltip_style()`；
+  - `in_list(column, values)`：拼 `IN` 子句并把单引号双写。不包一层的话，选国家的多选框里一选 `Cote d'Ivoire` 就会抛 `ParserException`；
+  - `date_range(values)`：`st.date_input` 范围模式只选了单天时返回 1 个值，直接解包会抛 `ValueError`。
+- **HTML 输出一律转义**：`page_header` / `kpi_row` / `legend` / `panel` 的文本走 `html.escape`，颜色只接受 `#RRGGBB`。新闻标题、用户输入的关键词都会进入 KPI 说明和新闻条目。
 - **数据配色放在独立模块 `app/palette.py`**（不依赖 Streamlit，便于单测）：常量 `PALETTE`、`SOURCE`、`ORDINAL`、`DIVERGING`、`SEQUENTIAL`、`EVENT_COLORS`、`EVENT_LABELS`、`OTHER_GRAY`、`MAP`；函数 `rgb(hex)`、`ordinal(n, mode)`、`sequential(hue, mode)`、`diverging(value, mode)`、`event_group` / `group_label` / `type_label` / `event_color`、`oklab(hex)`。
 - **删除**：`THEMES`、`THEME_KEY`、`DEFAULT_THEME`、`_CSS`、`_LIGHT_CSS`、`_TOOLTIP_*`、`_current_theme`、`_is_light`，以及无外部引用的 `ACCENT`、`PLOTLY_WAY`、`FONT_STACK`、`MONO_STACK`、`ACLED_TYPE_COLORS`。
 
