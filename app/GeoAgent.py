@@ -11,8 +11,7 @@ from pathlib import Path
 import streamlit as st
 
 APP = Path(__file__).resolve().parent
-if str(APP.parent) not in sys.path:
-    sys.path.insert(0, str(APP.parent))
+sys.path.insert(0, str(APP.parent))
 
 st.set_page_config(page_title="GeoScope", page_icon=":material/radar:", layout="wide",
                    initial_sidebar_state="expanded")

@@ -19,10 +19,27 @@ def test_router_opens_the_workspace_by_default(tmp_path, monkeypatch):
 
 
 def test_router_registers_the_workspace_first_and_six_dashboards():
-    pages = re.findall(r'st\.Page\("([^"]+)"', ROUTER.read_text(encoding="utf-8"))
+    pages = re.findall(r'^\s*st\.Page\("([^"]+)"', ROUTER.read_text(encoding="utf-8"), re.MULTILINE)
     assert pages[0] == "workspace.py"
     assert [Path(page).parent.name for page in pages[1:]] == ["dashboards"] * 6
     assert all((ROOT / "app" / page).is_file() for page in pages)
+
+
+def test_every_nav_page_renders_through_the_router(tmp_path, monkeypatch):
+    # 只看源码文本会漏掉被注释掉的注册项：switch_page 不检查注册表，照样能打开页面，
+    # 所以这里逐个页面走路由执行，确认注册项与文件一对一。
+    monkeypatch.setattr(sessions, "DB_PATH", tmp_path / "sessions.duckdb")
+    pages = re.findall(r'^\s*st\.Page\("([^"]+)"', ROUTER.read_text(encoding="utf-8"), re.MULTILINE)
+    assert len(pages) == 7, pages  # 少一个注册项时，循环会静默跳过它
+    app = AppTest.from_file(str(ROUTER), default_timeout=30).run()
+    assert not app.exception
+    for page in pages:
+        app.switch_page(page).run()
+        assert not app.exception, page
+        if page == "workspace.py":
+            assert app.chat_input(key="geoagent_prompt"), page
+        else:
+            assert "gs-header" in " ".join(item.value for item in app.markdown), page
 
 
 def test_no_pages_directory_next_to_the_router():
