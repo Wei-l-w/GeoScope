@@ -15,15 +15,31 @@ WATCH_KEY = "geoscope_theme_watch"
 MODES = ("light", "dark")
 
 _JS = """
-export default function ({ data, setStateValue }) {
+const pendingFrames = new WeakMap();
+
+export default function ({ data, parentElement, setStateValue }) {
+  // Cancel this instance's idle frame even when the new invocation is busy.
+  const previousFrame = pendingFrames.get(parentElement);
+  if (previousFrame !== undefined) {
+    cancelAnimationFrame(previousFrame);
+    pendingFrames.delete(parentElement);
+  }
   if (!data || data.busy) return;
-  requestAnimationFrame(() => {
+  const frame = requestAnimationFrame(() => {
+    pendingFrames.delete(parentElement);
     const app = document.querySelector('.stApp');
     const scheme = app ? getComputedStyle(app).colorScheme : '';
     if ((scheme === 'light' || scheme === 'dark') && scheme !== data.known) {
       setStateValue('mode', scheme);
     }
   });
+  pendingFrames.set(parentElement, frame);
+  return () => {
+    if (pendingFrames.get(parentElement) === frame) {
+      cancelAnimationFrame(frame);
+      pendingFrames.delete(parentElement);
+    }
+  };
 }
 """
 

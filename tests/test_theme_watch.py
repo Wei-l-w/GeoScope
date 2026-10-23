@@ -1,7 +1,10 @@
-"""主题监听组件的回归测试（AppTest）：回退顺序、上报值回传给前端、分析中延后上报。"""
+"""主题监听组件的回归测试（AppTest / JS）：回退顺序、主题回传与分析中取消上报。"""
 
 import json
+import shutil
+import subprocess
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 from app import theme_watch
@@ -51,3 +54,70 @@ def test_each_apptest_can_mount_the_watcher():
     # 每个 AppTest 有独立的组件注册表；组件只在导入时注册的话，第二个会报未注册
     for _ in range(2):
         assert _sent(_app())["known"] == "light"
+
+
+def test_busy_cancels_queued_theme_report_without_affecting_other_instances():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for the JavaScript behavior regression")
+
+    # 执行原始 ES 模块，保留模块级状态；可控 RAF 队列让 idle → busy 的竞态确定性重现。
+    script = """
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+const source = readFileSync(0, 'utf8');
+const { default: component } = await import(
+  'data:text/javascript;base64,' + Buffer.from(source).toString('base64')
+);
+const frames = new Map();
+let nextFrame = 0;
+globalThis.requestAnimationFrame = callback => {
+  const id = nextFrame++;
+  frames.set(id, callback);
+  return id;
+};
+globalThis.cancelAnimationFrame = id => frames.delete(id);
+globalThis.document = { querySelector: selector => selector === '.stApp' ? {} : null };
+globalThis.getComputedStyle = () => ({ colorScheme: 'dark' });
+function flush() {
+  const callbacks = [...frames.values()];
+  frames.clear();
+  for (const callback of callbacks) callback();
+}
+const reports = [[], []];
+const parents = [{}, {}];
+function mount(instance, busy = false) {
+  return component({
+    data: { known: 'light', busy },
+    parentElement: parents[instance],
+    setStateValue: (key, value) => reports[instance].push([key, value]),
+  });
+}
+mount(0);
+mount(0, true);
+flush();
+assert.deepEqual(reports[0], [], 'busy transition must cancel the queued theme report');
+mount(0);
+flush();
+assert.deepEqual(reports[0], [['mode', 'dark']], 'idle must resume theme reporting');
+reports[0].length = 0;
+mount(0);
+mount(1);
+mount(0, true);
+flush();
+assert.deepEqual(reports[0], [], 'the busy instance must not report');
+assert.deepEqual(reports[1], [['mode', 'dark']], 'instances must not cancel each other');
+const cleanup = mount(1);
+cleanup();
+flush();
+assert.deepEqual(reports[1], [['mode', 'dark']], 'unmount must cancel the pending report');
+"""
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", script],
+        input=theme_watch._JS,
+        capture_output=True,
+        encoding="utf-8",
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
