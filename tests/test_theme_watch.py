@@ -111,6 +111,12 @@ const cleanup = mount(1);
 cleanup();
 flush();
 assert.deepEqual(reports[1], [['mode', 'dark']], 'unmount must cancel the pending report');
+const cleanupA = mount(0);
+mount(0);
+cleanupA();
+mount(0, true);
+flush();
+assert.deepEqual(reports[0], [], 'stale cleanup must preserve the newer frame for busy cancellation');
 """
     result = subprocess.run(
         [node, "--input-type=module", "-e", script],
