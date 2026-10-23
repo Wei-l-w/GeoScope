@@ -21,6 +21,7 @@ data/*.duckdb.wal
 tmp_*.png
 screenshot.png
 *.log
+.superpowers/
 
 # ---- Agent 输出 ----
 data/agent_output/
