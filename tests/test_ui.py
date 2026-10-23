@@ -50,6 +50,11 @@ def test_in_list_escapes_quotes():
     assert ui.in_list("country", ["Cote d'Ivoire"]) == "country IN ('Cote d''Ivoire')"
 
 
+def test_in_list_rejects_an_empty_list():
+    with pytest.raises(ValueError):
+        ui.in_list("country", [])
+
+
 def test_date_range_accepts_a_single_picked_day():
     first, last = dt.date(2023, 10, 1), dt.date(2023, 12, 31)
     assert ui.date_range((first,)) == (first, first)
@@ -69,6 +74,8 @@ def test_helpers_escape_untrusted_text():
 def test_legend_rejects_unvalidated_colour(color):
     with pytest.raises(ValueError):
         ui.legend([("A", color)])
+    with pytest.raises(ValueError):
+        ui.legend([("A", [True, 2, 3])])  # bool 是 int 子类，不能混进 rgb()
 
 
 def test_dashboards_use_the_design_system():

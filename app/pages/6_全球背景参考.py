@@ -70,7 +70,7 @@ ui.kpi_row([
 ])
 
 # 发散色阶：冲突（红）← 灰色中点 → 合作（蓝）；按 0.1 分档查表，避免逐行做 OKLab 换算
-_STEPS = {round(v / 10, 1): palette.diverging(v / 10, mode) + [150] for v in range(-100, 101)}
+_STEPS = {round(v / 10, 1): palette.diverging(v / 10, mode) + [210] for v in range(-100, 101)}
 df["color"] = df["goldstein"].clip(-10, 10).round(1).map(_STEPS)
 
 ui.deck(

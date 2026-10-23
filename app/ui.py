@@ -43,8 +43,11 @@ def _css_color(value) -> str:
 
 
 def in_list(column: str, values) -> str:
-    """把取值列表拼成 IN 子句；单引号按 SQL 规则双写。调用方负责保证 values 非空。"""
-    return f"{column} IN (" + ",".join("'" + str(v).replace("'", "''") + "'" for v in values) + ")"
+    """把非空取值列表拼成 IN 子句；单引号按 SQL 规则双写。空列表直接报错，避免生成非法 SQL。"""
+    values = [str(value) for value in values]
+    if not values:
+        raise ValueError("in_list 需要至少一个取值")
+    return f"{column} IN (" + ",".join("'" + value.replace("'", "''") + "'" for value in values) + ")"
 
 
 def date_range(values) -> tuple:
@@ -87,7 +90,7 @@ def fit_bounds(left: float, bottom: float, right: float, top: float,
                viewport: tuple[int, int] = (720, 560), padding: float = 0.12) -> tuple[float, float, float]:
     """(纬度, 经度, 缩放)：按名义视口在 Web 墨卡托投影下分别算出经纬两向需要的缩放，
     取较小值并留边距，限制在 2–9 级；极小范围用 7 级。纬度中心取墨卡托中点，
-    经度取算术中点，四边边距因此相等。"""
+    经度取算术中点，上下边距相等、左右边距相等。"""
     if not all(math.isfinite(value) for value in (left, bottom, right, top)):
         return (0.0, 0.0, 2.0)
     width, height = max(viewport[0], 1), max(viewport[1], 1)
@@ -131,7 +134,8 @@ def kpi_row(items: list) -> None:
 def _rgb_color(value) -> str:
     """只接受 3 个 0–255 的整数，避免色阶元组等结构被拼成非法 CSS。"""
     if (isinstance(value, (list, tuple)) and len(value) == 3
-            and all(isinstance(channel, int) and 0 <= channel <= 255 for channel in value)):
+            and all(isinstance(channel, int) and not isinstance(channel, bool)
+                    and 0 <= channel <= 255 for channel in value)):
         return f"rgb({value[0]},{value[1]},{value[2]})"
     raise ValueError(f"颜色必须是 [r, g, b]：{value!r}")
 
