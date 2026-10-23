@@ -1,76 +1,130 @@
-"""对话工作区的展示组件；只在 GeoAgent 页面注入样式。"""
+"""对话面板：标题栏、消息、分析过程、结果标签、空状态示例与中断标注（设计文档 6.3）。"""
 
 from __future__ import annotations
 
 import html
 import json
-from pathlib import Path
 
 import streamlit as st
 
+from agent import artifacts
 from agent.conversation import clean_assistant_text
-from app import ui
+from app import map_view, palette, sessions_ui
 
+ASSISTANT_AVATAR = ":material/radar:"
+RADAR_SVG = ('<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">'
+             '<circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-opacity=".6" stroke-width="1.5"/>'
+             '<path d="M12 12 17 7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
+             '<circle cx="12" cy="12" r="2.2" fill="currentColor"/></svg>')
 TOOL_LABELS = {
-    "geocode": "定位地点", "buffer_analysis": "分析周边事件",
-    "ship_track": "查询船舶航迹", "query_database": "查询数据",
-    "knowledge_search": "检索相关报道",
+    "geocode": "定位地点", "buffer_analysis": "分析周边事件", "ship_track": "查询船舶航迹",
+    "query_database": "查询数据", "knowledge_search": "检索相关报道",
 }
-
-
-def setup() -> None:
-    light = ui.mode() == "light"  # 过渡：任务 7 重写本文件
-    palette = (
-        "--chat-bg:#f3f5f8;--chat-panel:#ffffff;--chat-soft:#f7f9fb;"
-        "--chat-user:#eaf4f4;--chat-line:#dfe5eb;--chat-text:#172b3a;"
-        "--chat-muted:#657687;--chat-accent:#087f8c;--chat-button:#e7f3f3;--chat-primary-ink:#ffffff;"
-        if light else
-        "--chat-bg:#161e2b;--chat-panel:#202b3b;--chat-soft:#253244;"
-        "--chat-user:#203e4b;--chat-line:#364559;--chat-text:#e9f0f6;"
-        "--chat-muted:#a5b5c7;--chat-accent:#76d6dc;--chat-button:#29414e;--chat-primary-ink:#14333c;"
-    )
-    styles = Path(__file__).with_name("chat.css").read_text(encoding="utf-8")
-    st.markdown("<style>:root{" + palette + "}" + styles + "</style>", unsafe_allow_html=True)
-
-
-def header() -> None:
-    st.markdown(
-        '<header class="chat-page-header"><div><div class="chat-eyebrow">GEOSCOPE / 红海专题</div>'
-        '<h1>空间分析工作台</h1><p>从一个问题开始，让事件、船舶与地图关联起来。</p></div>'
-        '<span class="chat-page-tag">历史数据分析</span></header>', unsafe_allow_html=True,
-    )
-
-
-def panel_header(title: str, subtitle: str, badge: str = "") -> None:
-    st.markdown(
-        '<div class="chat-panel-header"><div><h2>' + html.escape(title) + '</h2><p>'
-        + html.escape(subtitle) + '</p></div><span>' + html.escape(badge) + '</span></div>',
-        unsafe_allow_html=True,
-    )
-
-
-def welcome() -> None:
-    st.markdown(
-        '<div class="chat-welcome"><div class="chat-welcome-mark" aria-hidden="true">⌖</div>'
-        '<h3>今天想探索什么？</h3><p>查询周边事件、回看船舶航迹，<br>或从新闻中了解事件背景。</p></div>',
-        unsafe_allow_html=True,
-    )
+TABLE_LABELS = {"acled_events": "ACLED", "gdelt_events": "GDELT"}
+EXAMPLES = [
+    ("周边事件", ":material/warning:", "曼德海峡周边150公里内发生了多少起事件？按类型统计"),
+    ("船舶航迹", ":material/directions_boat:", "MMSI 668116204 最近30天走了什么路线？"),
+    ("事件背景", ":material/article:", "银河领袖号被劫持事件有什么背景？有哪些相关报道？"),
+    ("冲突排名", ":material/public:", "Goldstein 冲突最激烈的5个国家是哪些？"),
+]
 
 
 def tool_label(name: str) -> str:
     return TOOL_LABELS.get(name, "分析数据")
 
 
-def render_details(message: dict) -> None:
+def step_detail(name: str, args: dict) -> str:
+    """进行中列表里的一行摘要：只用调用参数，不解析工具输出。"""
+    if name == "geocode":
+        return f"定位地点：{args.get('place', '')}"
+    if name == "buffer_analysis":
+        table = args.get("table", "acled_events")
+        return f"分析周边事件：{TABLE_LABELS.get(table, table)}，半径 {args.get('radius_km')} km"
+    if name == "ship_track":
+        return f"查询船舶航迹：MMSI {args.get('mmsi')}，最近 {args.get('days', 7)} 天"
+    if name == "knowledge_search":
+        return f"检索相关报道：{args.get('query', '')}"
+    return tool_label(name)
+
+
+def _tool_names(message: dict) -> list[str]:
+    records = message.get("tool_records") or []
+    if records:
+        return [str(record.get("name", "")) for record in records]
+    return [str(step).split("(", 1)[0] for step in message.get("steps") or []]
+
+
+def steps_summary(message: dict) -> str:
+    """"定位地点 → 分析周边事件"：连续重复只记一次，最多 3 个。"""
+    labels = []
+    for name in _tool_names(message):
+        label = tool_label(name)
+        if not labels or labels[-1] != label:
+            labels.append(label)
+    return " → ".join(labels[:3] + (["…"] if len(labels) > 3 else []))
+
+
+def process_label(message: dict) -> str:
+    summary = steps_summary(message)
+    return f"分析过程 · {len(_tool_names(message))} 步" + (f" · {summary}" if summary else "")
+
+
+def prefill(question: str) -> None:
+    st.session_state[sessions_ui.PROMPT_KEY] = question
+
+
+def unanswered(messages: list[dict]) -> set:
+    """没有收到回答的提问 seq：既没有助手消息的 reply_to_seq 指向它，
+    也不是"紧跟一条未关联的旧式助手回答"的情况。"""
+    replied = {m.get("reply_to_seq") for m in messages if m.get("role") == "assistant"}
+    result = set()
+    for index, message in enumerate(messages):
+        seq = message.get("seq")
+        if message.get("role") != "user" or seq is None or seq in replied:
+            continue
+        following = messages[index + 1] if index + 1 < len(messages) else None
+        if following and following.get("role") == "assistant" and following.get("reply_to_seq") is None:
+            continue
+        result.add(seq)
+    return result
+
+
+def header(title: str, subtitle: str, sid: str | None, busy: bool) -> None:
+    with st.container(horizontal=True, horizontal_alignment="distribute", vertical_alignment="center",
+                      key="chat_header"):
+        st.markdown(f'<div class="gs-chat-title"><b>{html.escape(title)}</b>'
+                    f'<span>{html.escape(subtitle)}</span></div>', unsafe_allow_html=True)
+        with st.popover("", icon=":material/more_horiz:", type="tertiary", disabled=busy or not sid,
+                        key="chat_menu"):
+            st.caption("删除会同时移除本会话的聊天记录与记忆。")
+            st.button("删除会话", key="delete_session", icon=":material/delete:", width="stretch",
+                      on_click=sessions_ui.delete_current, args=(sid,))
+
+
+def welcome(busy: bool) -> None:
+    st.markdown(
+        '<div class="gs-welcome"><div class="gs-welcome-mark">' + RADAR_SVG + '</div>'
+        '<h3>从一个问题开始</h3><p>查询周边事件、回看船舶航迹，或从新闻中了解事件背景。<br>'
+        '结果会作为图层出现在右侧地图上。</p></div>', unsafe_allow_html=True,
+    )
+    columns = st.columns(2, gap="small")
+    for index, (label, icon, question) in enumerate(EXAMPLES):
+        with columns[index % 2]:
+            st.button(label, key=f"geoagent_example_{index}", icon=icon, help=question, width="stretch",
+                      disabled=busy, on_click=prefill, args=(question,))
+    st.caption("点选示例只会填入输入框，可修改后再发送")
+
+
+def render_process(message: dict) -> None:
     records = message.get("tool_records") or []
     steps = message.get("steps") or []
     if not records and not steps:
         return
-    with st.expander(f"分析过程 · {len(records) if records else len(steps)} 步", expanded=False):
+    icon = ":material/error:" if message.get("error") else ":material/check_circle:"
+    with st.expander(process_label(message), icon=icon, expanded=False):
         if records:
             for record in records:
-                state = "已阻止重复执行" if record.get("blocked") else (
-                    "已完成" if record.get("success") else "未完成")
+                state = "已阻止重复执行" if record.get("blocked") else ("已完成" if record.get("success") else "未完成")
                 st.caption(f"{tool_label(record.get('name', ''))} · {state}")
                 st.code(json.dumps(record.get("args", {}), ensure_ascii=False, indent=2), language="json")
                 st.text(str(record.get("output", ""))[:1800])
@@ -79,28 +133,44 @@ def render_details(message: dict) -> None:
                 st.code(str(step), language="text")
 
 
-def render_message(message: dict) -> None:
+def _swatch(kind: str, mode: str) -> str:
+    colors = palette.MAP[mode]
+    if kind == "buffer":
+        return f'<i class="ring" style="border-color:{colors["buffer"]}"></i>'
+    if kind == "track":
+        return f'<i class="line" style="background:{colors["track"]}"></i>'
+    if kind == "events":
+        return f'<i class="dot" style="background:{palette.EVENT_COLORS["Battles"]}"></i>'
+    return f'<i class="ring" style="border-color:{colors["ring"]}"></i>'
+
+
+def result_chips(message: dict, mode: str) -> None:
+    """本轮产生的图层：名称与图层按钮一致，色块与地图同色。"""
+    chips = []
+    for path in message.get("geojson") or []:
+        try:
+            data = map_view.load(path)
+        except artifacts.ArtifactError:
+            continue
+        for kind, features in map_view.split(data):
+            chips.append(f'<span class="gs-result">{_swatch(kind, mode)}{html.escape(map_view.layer_label(kind, features))}</span>')
+    if chips:
+        st.markdown(f'<div class="gs-results">{"".join(chips)}</div>', unsafe_allow_html=True)
+
+
+def render_message(message: dict, mode: str, *, interrupted: bool = False, busy: bool = False) -> None:
     is_user = message.get("role") == "user"
-    with st.chat_message("user" if is_user else "assistant", avatar="user" if is_user else ":material/explore:"):
-        st.caption("你" if is_user else "GeoScope")
+    with st.chat_message("user" if is_user else "assistant", avatar="user" if is_user else ASSISTANT_AVATAR):
         content = message.get("content") or "本轮没有生成回答。"
-        st.markdown(content if is_user else clean_assistant_text(content))
-        if not is_user:
-            if message.get("error"):
-                st.caption("本轮分析未完成，可调整问题后重试。")
-            render_details(message)
-
-
-def render_map_files(paths: list[str]) -> None:
-    if not paths:
-        return
-    with st.expander(f"地图结果 · {len(paths)} 个文件", expanded=False):
-        output_root = Path(__file__).resolve().parents[1] / "data" / "agent_output"
-        for index, raw_path in enumerate(paths):
-            path = Path(raw_path)
-            if path.suffix.lower() == ".geojson" and path.resolve().is_relative_to(output_root) and path.is_file():
-                st.download_button("下载 " + path.name, path.read_bytes(), file_name=path.name,
-                                   mime="application/geo+json", key=f"geoagent_download_{index}",
-                                   on_click="ignore", width="stretch")
-            else:
-                st.caption(f"{path.name} 暂不可用，可重新运行对应分析。")
+        if is_user:
+            st.markdown(content)
+            if interrupted:
+                st.caption("分析被中断，没有生成回答")
+                st.button("重新填入", key=f"refill_{message.get('seq')}", type="tertiary", icon=":material/edit:",
+                          disabled=busy, on_click=prefill, args=(content,))
+            return
+        render_process(message)
+        st.markdown(clean_assistant_text(content))
+        result_chips(message, mode)
+        if message.get("error"):
+            st.caption("本轮分析未完成，可调整问题后重试。")

@@ -50,8 +50,7 @@ def _session(store, title, answer, paths=None):
 
 
 def _open(app, sid):
-    app.selectbox(key="session_picker").select(sid).run()
-    next(button for button in app.button if button.label == "打开").click().run()
+    app.button(key=f"session_{sid}").click().run()
     assert not app.exception
     return app
 
@@ -72,31 +71,32 @@ def _deck(app):
     return json.loads(charts[0].proto.json)
 
 
-def test_prepare_zero_event_southern_buffer_has_layer_and_correct_view():
+def test_build_zero_event_southern_buffer_has_layer_and_correct_view():
     path = _polygon_file()
-    result = map_view.prepare([path, path])
+    state = map_view.build([(1, [path, path])])
 
-    assert result.paths == [path]
-    assert not result.errors
-    assert len(result.layers) == result.features == 1
-    assert result.points == 0
-    assert result.view[:2] == pytest.approx((-17, -145))
-    assert result.view != (15.0, 43.0, 4.5)
-    assert result.layers[0].data["features"][0]["properties"]["radius_km"] == 100
+    assert [file for _, file, _ in state.files] == [path]
+    assert not state.errors
+    assert len(state.layers) == state.feature_count == 1
+    assert state.layers[0].kind == "buffer"
+    assert state.view[:2] == pytest.approx((-17.003, -145.0), abs=0.01)
+    assert state.view != map_view.DEFAULT_VIEW
+    assert state.layers[0].features[0]["properties"]["radius_km"] == 100
 
 
 @pytest.mark.parametrize("kind", ["missing", "damaged"])
-def test_prepare_missing_or_damaged_file_reports_failure(kind):
+def test_build_missing_or_damaged_file_reports_failure(kind):
     artifacts.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     path = artifacts.OUTPUT_DIR / f"{kind}.geojson"
     if kind == "damaged":
         path.write_text("{broken geojson", encoding="utf-8")
 
-    result = map_view.prepare([str(path)])
+    state = map_view.build([(1, [str(path)])])
 
-    assert result.errors
-    assert not result.paths and not result.layers
-    assert result.features == result.points == 0
+    assert state.errors
+    assert not state.files and not state.layers
+    assert state.feature_count == 0
+    assert state.view == map_view.DEFAULT_VIEW
 
 
 def test_page_restores_real_map_and_does_not_load_empty_reply(map_sessions):
@@ -105,15 +105,15 @@ def test_page_restores_real_map_and_does_not_load_empty_reply(map_sessions):
     empty = _session(map_sessions, "尚无结果的会话", "")
     app = _open(_app(), real)
 
-    assert "已加载 1 个地图文件 · 1 个要素 · 0 个点要素" in _captions(app)
+    assert "1 个图层 · 1 个要素 · 已定位到最新结果" in _captions(app)
     deck = _deck(app)
     assert len(deck["layers"]) == 1
-    assert deck["initialViewState"]["latitude"] == pytest.approx(-17)
-    assert deck["initialViewState"]["longitude"] == pytest.approx(-145)
+    assert deck["initialViewState"]["latitude"] == pytest.approx(-17.003, abs=0.01)
+    assert deck["initialViewState"]["longitude"] == pytest.approx(-145.0, abs=0.01)
 
     _open(app, empty)
-    assert "已加载" not in _captions(app)
-    assert "尚未生成分析图层" in _captions(app)
+    assert "个图层" not in _captions(app)
+    assert "提问后，分析结果会作为图层出现在这里" in _captions(app)
     assert not _deck(app).get("layers", [])
 
 
@@ -124,12 +124,12 @@ def test_page_warns_about_missing_map_and_ignores_path_in_answer(map_sessions):
     app = _open(_app(), missing)
 
     assert any("地图加载失败" in warning.value for warning in app.warning)
-    assert "已加载" not in _captions(app)
+    assert "个图层" not in _captions(app)
     assert not _deck(app).get("layers", [])
 
     _open(app, fabricated)
-    assert "尚未生成分析图层" in _captions(app)
-    assert "已加载" not in _captions(app)
+    assert "提问后，分析结果会作为图层出现在这里" in _captions(app)
+    assert "个图层" not in _captions(app)
     assert not _deck(app).get("layers", [])
     assert map_sessions.load_messages(fabricated)[-1]["geojson"] == []
 
@@ -146,15 +146,15 @@ def test_zero_event_buffer_tool_artifact_renders_on_page(tmp_path, monkeypatch, 
     })
     assert "圈内共 0 条记录" in output
     path = artifacts.validated_path(artifacts.extract_tool_path(output))
-    result = map_view.prepare([path])
-    assert result.features == 1 and result.points == 0
-    assert not result.errors
+    state = map_view.build([(1, [path])])
+    assert state.feature_count == 1 and [layer.kind for layer in state.layers] == ["buffer"]
+    assert not state.errors
     sid = _session(map_sessions, "显示100公里内的 GDELT 事件", output, [path])
     app = _open(_app(), sid)
 
-    assert "已加载 1 个地图文件 · 1 个要素 · 0 个点要素" in _captions(app)
+    assert "1 个图层 · 1 个要素 · 已定位到最新结果" in _captions(app)
     deck = _deck(app)
     assert len(deck["layers"]) == 1
     assert deck["layers"][0]["data"]["features"][0]["geometry"]["type"] == "Polygon"
-    assert deck["initialViewState"]["latitude"] == pytest.approx(-17.6797)
-    assert deck["initialViewState"]["longitude"] == pytest.approx(-149.4068)
+    assert deck["initialViewState"]["latitude"] == pytest.approx(-17.682, abs=0.01)
+    assert deck["initialViewState"]["longitude"] == pytest.approx(-149.4068, abs=0.01)

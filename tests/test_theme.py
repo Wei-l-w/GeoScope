@@ -97,3 +97,24 @@ def test_primary_button_contrast_override_excludes_disabled_buttons():
     assert selectors, "primary button contrast override must remain present"
     for selector in selectors:
         assert '[data-testid="stBaseButton-primary"]:not(:disabled)' in selector, selector
+
+
+# 设计文档 4.3 登记表里的增强样式用到的 data-testid
+REGISTERED_TESTIDS = {
+    "stBaseButton-primary", "stMainBlockContainer", "stDeckGlJsonChart", "stChatMessage",
+    "stChatMessageAvatarUser", "stHorizontalBlock", "stColumn", "stLayoutWrapper",
+}
+
+
+def test_custom_css_stays_within_budget_and_registered_selectors():
+    sheets = sorted(STYLES.glob("*.css"))
+    assert [sheet.name for sheet in sheets] == ["base.css", "workspace.css"]
+    texts = [sheet.read_text(encoding="utf-8") for sheet in sheets]
+    assert sum(len(text.splitlines()) for text in texts) <= 250
+    testids = [found for text in texts for found in re.findall(r'\[data-testid="([^"]+)"\]', text)]
+    assert len(testids) <= 20
+    assert set(testids) <= REGISTERED_TESTIDS
+    assert not (ROOT / "app" / "chat.css").exists()
+    # CSS 只放在 app/styles/ 里，Python 文件不再内嵌 data-testid 选择器
+    leaks = [path.name for path in (ROOT / "app").rglob("*.py") if "data-testid" in path.read_text(encoding="utf-8")]
+    assert not leaks

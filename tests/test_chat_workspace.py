@@ -33,8 +33,7 @@ def _button(app, label):
 
 
 def _open(app, sid):
-    app.selectbox(key="session_picker").select(sid).run()
-    _button(app, "打开").click().run()
+    app.button(key=f"session_{sid}").click().run()
     assert not app.exception
     return app
 
@@ -104,8 +103,10 @@ def test_submit_persists_reply_and_tool_evidence(chat_db, monkeypatch):
     assert stored[1]["error"] is None
     assert app.session_state["agent_messages"][1]["tool_records"] == records
     assert "已完成这艘船的航迹分析。" in _message_text(app.chat_message[1])
-    assert app.chat_message[1].expander[0].label == "分析过程 · 1 步"
-    assert not app.chat_message[1].expander[0].proto.expanded
+    # 带图标的 st.expander 在 AppTest 里归为 Status（st.status 就是带图标的折叠区）
+    process = app.chat_message[1].status[0]
+    assert process.label == "分析过程 · 1 步 · 查询船舶航迹"
+    assert not process.proto.expanded
 
 
 @pytest.mark.parametrize("failure", ["error_result", "exception", "no_answer"])
@@ -179,7 +180,7 @@ def test_new_chat_clears_draft_and_legacy_pending_question(chat_db, monkeypatch)
     # 直接写入状态模拟尚未发送的输入，不触发 chat_input 的提交事件。
     app.session_state["geoagent_prompt"] = "未发送的航迹分析草稿"
     app.session_state["_pending_question"] = "旧实现遗留的示例问题"
-    _button(app, "新会话").click().run()
+    app.button(key="new_analysis").click().run()
     assert not app.exception
     assert app.session_state["current_session_id"] is None
     assert not app.chat_message

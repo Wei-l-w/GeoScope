@@ -1,0 +1,60 @@
+/* 工作台布局（设计文档 6.1）。.st-key-* 由 st.container(key=...) 生成，有文档保证；
+   [data-testid] 只出现在登记过的增强样式里（设计文档 4.3 表 #4–#8）。 */
+
+/* 面板 */
+.st-key-chat_panel, .st-key-map_panel {
+  background: var(--gs-panel); border: 1px solid var(--gs-line); border-radius: 12px; gap: 0; overflow: hidden;
+}
+.st-key-chat_header { padding: 10px 10px 10px 18px; border-bottom: 1px solid var(--gs-line); min-height: 56px; }
+.gs-chat-title b { display: block; font-size: 14.5px; font-weight: 650; color: var(--gs-text); line-height: 1.4; }
+.gs-chat-title span { font-size: 12px; color: var(--gs-muted); }
+.st-key-chat_history { padding: 12px 16px; }
+.st-key-chat_composer { padding: 10px 16px 12px; border-top: 1px solid var(--gs-line); gap: 6px; }
+.st-key-map_bar { padding: 10px 12px; border-bottom: 1px solid var(--gs-line); min-height: 56px; }
+.st-key-map_footer { padding: 8px 14px 10px; border-top: 1px solid var(--gs-line); gap: 16px; }
+
+/* 空状态 */
+.gs-welcome { text-align: center; padding: 28px 8px 8px; }
+.gs-welcome-mark { width: 46px; height: 46px; border-radius: 13px; margin: 0 auto 14px; display: grid;
+  place-items: center; background: var(--gs-accent-soft); color: var(--gs-accent); }
+.gs-welcome h3 { font-size: 19px; margin: 0 0 8px; padding: 0; color: var(--gs-text); }
+.gs-welcome p { color: var(--gs-muted); font-size: 13px; line-height: 1.7; }
+
+/* 回答末尾的结果标签：色块与地图图层同色 */
+.gs-results { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.gs-result { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--gs-muted);
+  border: 1px solid var(--gs-line); border-radius: 999px; padding: 2px 9px; }
+.gs-result i { display: inline-block; flex: none; }
+.gs-result i.line { width: 14px; height: 3px; border-radius: 2px; }
+.gs-result i.ring { width: 10px; height: 10px; border-radius: 50%; border: 2px solid; box-sizing: border-box; }
+.gs-result i.dot { width: 8px; height: 8px; border-radius: 50%; }
+
+/* 本会话记忆 */
+.gs-card-t { font-size: 14px; font-weight: 650; color: var(--gs-text); }
+.gs-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.gs-chip { font-size: 12px; border: 1px solid var(--gs-line); background: var(--gs-soft); border-radius: 6px;
+  padding: 2px 7px; color: var(--gs-text); }
+.gs-chip em { font-style: normal; color: var(--gs-muted); margin-right: 4px; }
+
+/* ---- 增强样式：失效时只退回原生外观 ---- */
+/* #4 用户消息靠右气泡、隐藏用户头像 */
+.st-key-chat_history [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
+  margin-left: auto; max-width: 86%; background: var(--gs-user); border: 1px solid var(--gs-user-line);
+  border-radius: 14px 14px 4px 14px; padding: 8px 12px;
+}
+.st-key-chat_history [data-testid="stChatMessageAvatarUser"] { display: none; }
+/* #5 窄于 1000px 时对话与地图上下排列；只作用于最外层两栏，标题栏、示例按钮等内部横排不受影响 */
+@media (max-width: 1000px) {
+  .st-key-workspace > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] { flex-direction: column; }
+  .st-key-workspace > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+    width: 100% !important; flex: 1 1 100% !important; }
+}
+/* #7 会话列表左对齐、单行省略 */
+.st-key-session_list button > div { justify-content: flex-start; min-width: 0; }
+.st-key-session_list button p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* #8 两个面板填满视口：对话历史与地图画布吃掉其余高度（失效时退回 Python 里的 520px / 600px） */
+[data-testid="stLayoutWrapper"]:has(> .st-key-chat_panel),
+[data-testid="stLayoutWrapper"]:has(> .st-key-map_panel) { height: calc(100dvh - 5.5rem); }
+.st-key-chat_panel, .st-key-map_panel { height: 100%; }
+[data-testid="stLayoutWrapper"]:has(> .st-key-chat_history),
+[data-testid="stLayoutWrapper"]:has(> .st-key-map_canvas) { flex: 1 1 0; height: auto !important; min-height: 0; }
