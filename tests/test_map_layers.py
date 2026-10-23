@@ -65,6 +65,22 @@ def test_one_file_splits_into_named_layers_in_drawing_order(geojson):
     assert state.feature_count == 5
 
 
+def test_point_rows_with_an_mmsi_column_are_query_results_not_tracks(geojson):
+    # query_database 把 mmsi 列也写成属性，逐行一个 Point；只看 mmsi 会把它当成航迹，每点一个图层
+    rows = [_feature("Point", [43.0 + 0.01 * index, 12.0], mmsi="600000000", speed="12.4")
+            for index in range(3)]
+    state = map_view.build([(1, [geojson("ais", rows)])])
+
+    assert [(layer.kind, layer.label) for layer in state.layers] == [("points", "查询结果 · 3 点")]
+    assert [layer.type for layer in map_view.deck_layers(state.layers, _all(state), "light")] == ["ScatterplotLayer"]
+
+
+def test_single_point_track_stays_a_track(geojson):
+    one = _feature("Point", [40.0, 18.0], mmsi=1, points_total=1, points_shown=1)
+    state = map_view.build([(1, [geojson("track_one", [one])])])
+    assert [(layer.kind, layer.label) for layer in state.layers] == [("track", "航迹 · 1")]
+
+
 def test_tooltips_are_prepared_in_chinese(geojson):
     path = geojson("tips", [BUFFER, TRACK, _event("Explosions/Remote violence"), QUERY_POINT])
     state = map_view.build([(1, [path])])
@@ -85,6 +101,12 @@ def test_same_names_get_turn_suffix(geojson):
     first, second = geojson("buffer_a", [BUFFER]), geojson("buffer_b", [BUFFER])
     state = map_view.build([(1, [first]), (3, [second])])
     assert [layer.label for layer in state.layers] == ["缓冲区 150 km · 第 1 轮", "缓冲区 150 km · 第 3 轮"]
+
+
+def test_same_turn_layers_with_the_same_name_are_numbered(geojson):
+    first, second = geojson("buffer_a", [BUFFER]), geojson("buffer_b", [BUFFER])
+    state = map_view.build([(1, [first, second])])
+    assert [layer.label for layer in state.layers] == ["缓冲区 150 km · 第 1 轮 · 1", "缓冲区 150 km · 第 1 轮 · 2"]
 
 
 def test_file_repeated_in_later_turn_belongs_to_that_turn(geojson):
@@ -136,6 +158,18 @@ def test_view_fits_latest_turn_in_web_mercator(geojson):
     # 10°N–30°N 在墨卡托下比按度数算更"高"：缩放 3.80，按度数线性算会得到 3.90
     # 中心取墨卡托中点（任务 4 的质量复查修正）：算术中点 20.0 会让上下边距不等
     assert state.view == (20.322, 40.0, 3.8)
+
+
+def test_view_follows_the_shortest_arc_across_the_antimeridian(geojson):
+    # -179° 与 179.5° 相距 1.5°；简单取最小/最大会得到覆盖 358.5° 的"全球"视野
+    path = geojson("dateline", [_feature("Point", [-179.0, -17.0]), _feature("Point", [179.5, -17.0])])
+    assert map_view.build([(1, [path])]).view == (-17.0, -179.75, 8.0)
+
+
+def test_worldwide_points_still_fit_the_whole_map(geojson):
+    path = geojson("world", [_feature("Point", [-170.0, 0.0]), _feature("Point", [0.0, 0.0]),
+                             _feature("Point", [170.0, 0.0])])
+    assert map_view.build([(1, [path])]).view == (0.0, 0.0, 2.0)
 
 
 def test_without_layers_the_map_shows_the_red_sea():

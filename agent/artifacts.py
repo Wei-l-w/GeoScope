@@ -99,6 +99,36 @@ def coordinate_bounds(data: dict) -> tuple[float, float, float, float]:
     return tuple(bounds)
 
 
+def longitude_extent(features: list[dict]) -> tuple[float, float]:
+    """经度的覆盖区间：取经度排序后最大空隙的另一侧，跨日界线时右端可超过 180。
+    coordinate_bounds 只做最小/最大，一对 ±179° 的点会被算成覆盖整圈。"""
+    values = sorted({lon for feature in features for lon, _ in _geometry_positions(feature.get("geometry"))})
+    if not values:
+        raise ArtifactError("地图结果为空，没有可显示的几何图层。")
+    gaps = [((values[(index + 1) % len(values)] - values[index]) % 360, index) for index in range(len(values))]
+    gap, seam = max(gaps)
+    if gap <= 180:  # 覆盖不超过半个地球，普通区间即可
+        return values[0], values[-1]
+    start = (seam + 1) % len(values)
+    return values[start], values[seam] + (360 if seam < start else 0)
+
+
+def _check_properties(data: dict) -> None:
+    """属性必须是对象且只含简单值：界面和提示会直接展示这些值，不做嵌套解析。"""
+    for feature in data["features"]:
+        properties = feature.get("properties")
+        if properties is not None and not isinstance(properties, dict):
+            raise ArtifactError("GeoJSON 的属性必须是对象。")
+        for value in (properties or {}).values():
+            if isinstance(value, (dict, list)):
+                raise ArtifactError("GeoJSON 的属性值必须是简单值。")
+            if isinstance(value, int) and not isinstance(value, bool):
+                try:
+                    float(value)
+                except OverflowError:
+                    raise ArtifactError("GeoJSON 的属性数值超出范围。") from None
+
+
 def _parse_float(value):
     number = float(value)
     if not math.isfinite(number):
@@ -124,6 +154,7 @@ def load_geojson(path: str) -> dict:
     except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         raise ArtifactError("地图文件无法读取或内容损坏，请重新生成图层。") from exc
     coordinate_bounds(data)
+    _check_properties(data)
     return data
 
 

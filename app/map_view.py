@@ -86,8 +86,8 @@ def _kind(feature: dict) -> str:
         return "buffer"
     if shape == "Point" and "event_type" in props:
         return "events"
-    if shape in ("LineString", "Point") and "mmsi" in props:
-        return "track"
+    if "mmsi" in props and (shape == "LineString" or "points_total" in props):
+        return "track"  # ship_track 的两种输出：多点线，或只有 1 个点
     if shape in ("Point", "MultiPoint"):
         return "points"
     return "other"
@@ -139,6 +139,12 @@ def build(turn_paths: list[tuple[int, list[str]]], reset: int = 0) -> MapState:
     for layer in state.layers:
         if counts[layer.label] > 1:
             layer.label = f"{layer.label} · 第 {layer.turn} 轮"
+    counts = Counter(layer.label for layer in state.layers)  # 一轮里仍同名：一次回答做了两个缓冲区
+    index: Counter = Counter()
+    for layer in state.layers:
+        if counts[layer.label] > 1:
+            index[layer.label] += 1
+            layer.label = f"{layer.label} · {index[layer.label]}"
     state.errors = list(dict.fromkeys(state.errors))
     state.view = fit_view(state.layers)
     state.reset = reset
@@ -147,13 +153,20 @@ def build(turn_paths: list[tuple[int, list[str]]], reset: int = 0) -> MapState:
 
 # ---------------------------------------------------------------- 视野
 def fit_view(layers: list[MapLayer]) -> tuple[float, float, float]:
-    """定位到最新一轮产出图层的范围；与图层是否隐藏无关，所以切换开关不会改变视野。"""
+    """定位到最新一轮产出图层的范围；与图层是否隐藏无关，所以切换开关不会改变视野。
+    经度取跨日界线的最短弧，再折回 -180–180，避免一对 ±179° 的点定位到全球。"""
     if not layers:
         return DEFAULT_VIEW
     latest = max(layer.turn for layer in layers)
     features = [item for layer in layers if layer.turn == latest for item in layer.features]
-    bounds = artifacts.coordinate_bounds({"type": "FeatureCollection", "features": features})
-    return ui.fit_bounds(*bounds, viewport=NOMINAL_VIEWPORT, padding=PADDING)
+    _, bottom, _, top = artifacts.coordinate_bounds({"type": "FeatureCollection", "features": features})
+    left, right = artifacts.longitude_extent(features)
+    latitude, longitude, zoom = ui.fit_bounds(left, bottom, right, top, viewport=NOMINAL_VIEWPORT, padding=PADDING)
+    if longitude > 180.0:
+        longitude -= 360.0
+    elif longitude < -180.0:
+        longitude += 360.0
+    return (latitude, longitude, zoom)
 
 
 # ---------------------------------------------------------------- 图层样式
@@ -292,7 +305,7 @@ def render_bar(state: MapState, sid: str | None, busy: bool) -> set:
                         help="下载 GeoJSON"):
             for index, (turn, path, summary) in enumerate(state.files):
                 file = Path(path)
-                st.download_button(f"{summary} · 第 {turn} 轮 · {file.name}", file.read_bytes(),
+                st.download_button(f"{summary} · 第 {turn} 轮 · {file.name}", lambda path=path: Path(path).read_bytes(),
                                    file_name=file.name, mime="application/geo+json",
                                    key=f"geoagent_download_{index}", on_click="ignore", width="stretch")
     return set(visible)
