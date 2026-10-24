@@ -195,6 +195,7 @@ GitHub Actions（`.github/workflows/ci.yml`）：checkout → 安装依赖 → �
 ├── app/ui.py           # 各页共用组件：页头、KPI、图例、地图与图表封装
 ├── app/db.py           # 看板只读查询（带缓存的 DuckDB 连接）
 ├── app/styles/         # 设计令牌与工作台布局 CSS
+├── app/static/         # Logo 等静态资源
 ├── app/dashboards/     # 总览 / AIS / ACLED / 时空叠加 / 新闻检索 / 全球背景参考
 ├── agent/              # 智能体核心
 │   ├── react.py        # ReAct 主循环（流式事件）

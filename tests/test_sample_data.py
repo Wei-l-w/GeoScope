@@ -52,3 +52,21 @@ def test_positions_decode_to_the_documented_regions(raw):
     for lon, lat in decoded:
         assert any(abs(lat - region_lat) <= 5 and abs(lon - region_lon) <= 5
                    for _, region_lat, region_lon in sample.SEA_REGIONS), f"坐标偏离所有海域：{lon}, {lat}"
+
+
+def test_speed_and_course_keep_their_tenths(raw):
+    """第 7 列航向、第 9 列航速也是 ×10（mappings 里 /10.0 还原，1022/3600 为哨兵值）。
+
+    漏乘 10 不会报错：航速全部变成 0–2.7 节，页面照常渲染，只是每条船都几乎停着。
+    上下界之外还要求真的有高速样本，否则"全都恰好是 0"也能通过范围断言。
+    """
+    sample.gen_ais()
+
+    rows = _rows(raw / "ais_sample.csv")
+    courses = [int(row[6]) for row in rows]
+    speeds = [int(row[8]) for row in rows]
+
+    assert all(0 <= value < 3600 for value in courses), "航向应在 0–359.9 度（×10）"
+    assert all(0 <= value < 1022 for value in speeds), "航速应在 0–102.1 节（×10），1022 是哨兵值"
+    assert max(speeds) > 100, "样例里应有明显高于 10 节的航速，否则船在图上不动"
+    assert max(courses) > 1000, "航向应铺开在整圈上，而不是挤在 0 附近"
