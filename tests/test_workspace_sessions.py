@@ -109,20 +109,49 @@ def test_session_deleted_in_another_tab_falls_back_to_a_new_one(store):
     assert "还没有历史会话" in _captions(app)
 
 
-def test_corrupted_memory_is_reported_without_hiding_the_chat(store):
-    # 记忆行损坏（旧版本数据、手工改库）不是"会话被删"：聊天记录要留着，并明说记忆读不了
+def _corrupt_memory(store, sid):
     import duckdb
 
-    sid = _chat(store, "记忆损坏")
-    app = _open(_app(), sid)
     with duckdb.connect(str(store.DB_PATH)) as con:
         con.execute("INSERT INTO chat_memory (session_id, memory_json, cutoff_seq) VALUES (?, ?, 0) "
                     "ON CONFLICT (session_id) DO UPDATE SET memory_json = excluded.memory_json",
                     [sid, "{not json"])
 
+
+def test_corrupted_memory_does_not_hide_the_chat_or_block_new_questions(store, monkeypatch):
+    # 记忆行损坏（旧版本数据、手工改库）不是"会话被删"：聊天记录要留着，
+    # 而且这个会话此后每一次提问都得能正常完成——坏快照按空记忆重建，下一次保存覆盖它。
+    sid = _chat(store, "记忆损坏")
+    app = _open(_app(), sid)
+    _corrupt_memory(store, sid)
+
+    def fake_stream(prompt, history=None, session_id=None):
+        yield {"type": "thinking", "step": 1}
+        yield {"type": "answer", "result": react.AgentResult(question=prompt, answer="这是本轮的回答。")}
+
+    monkeypatch.setattr(react, "stream", fake_stream)
+    app.chat_input(key="geoagent_prompt").set_value("损坏之后还能提问吗？").run()
+
+    assert not app.exception
+    assert app.session_state["current_session_id"] == sid
+    stored = store.load_messages(sid)
+    assert stored[-1]["content"] == "这是本轮的回答。"
+    assert store.load_memory(sid) is not None  # 坏快照已被重建的记忆覆盖
+
+
+def test_corrupted_message_json_is_reported_without_hiding_the_chat(store):
+    # 消息行里的 steps_json/geojson_json 损坏：会话还在，只是记忆读不出来。
+    # 不能当成"会话被删"把整段聊天清掉，也不能整页红屏。
+    import duckdb
+
+    sid = _chat(store, "消息损坏")
+    app = _open(_app(), sid)
+    with duckdb.connect(str(store.DB_PATH)) as con:
+        con.execute("UPDATE chat_messages SET steps_json = ? WHERE session_id = ?", ["{not json", sid])
+
     app.run()
     assert not app.exception
-    assert app.session_state["current_session_id"] == sid  # 不能当成"会话被删"静默清空
+    assert app.session_state["current_session_id"] == sid
     assert len(app.chat_message) == 2
     assert any("记忆无法读取" in str(item.value) for item in app.error)
 
@@ -205,7 +234,10 @@ def test_a_run_disables_every_interactive_block_end_to_end(store, monkeypatch):
         return real_header(title, subtitle, sid, busy)
 
     def spy_message(message, mode, **kwargs):
-        seen.append(("message", kwargs.get("busy", False)))
+        # 历史循环会传 interrupted（并带上"重新填入"按钮），本轮实时渲染不传：
+        # 分开记，否则实时渲染的 busy=True 会替历史循环的接线打掩护。
+        seen.append(("history", bool(kwargs.get("interrupted")), kwargs.get("busy", False))
+                    if "interrupted" in kwargs else ("live", kwargs.get("busy", False)))
         return real_message(message, mode, **kwargs)
 
     def fake_stream(prompt, history=None, session_id=None):
@@ -218,12 +250,16 @@ def test_a_run_disables_every_interactive_block_end_to_end(store, monkeypatch):
     monkeypatch.setattr(chat_ui, "render_message", spy_message)
     monkeypatch.setattr(react, "stream", fake_stream)
 
-    app = _app()
+    sid = _chat(store, "已有会话")
+    store.save_message(sid, "user", "上一轮没收到回答的提问")  # 历史里会画出"重新填入"
+    app = _open(_app(), sid)
     seen.clear()
     app.chat_input(key="geoagent_prompt").set_value("曼德海峡周边有哪些事件？").run()
     assert not app.exception
-    for block in ("sidebar", "bar", "header", "message"):
+    for block in ("sidebar", "bar", "header"):
         assert (block, True) in seen, (block, seen)
+    assert ("live", True) in seen, seen
+    assert ("history", True, True) in seen, seen  # 历史里中断提问的"重新填入"也必须置灰
 
 
 def test_clearing_memory_of_a_deleted_session_does_not_raise(store):

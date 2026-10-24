@@ -179,12 +179,21 @@ def _load_messages(con: duckdb.DuckDBPyConnection, session_id: str, cutoff: int 
 
 
 def load_memory(session_id: str) -> dict | None:
-    """读取本会话记忆；新建、清空或不存在的会话返回 None。"""
+    """读取本会话记忆；新建、清空或不存在的会话返回 None。
+
+    快照损坏（旧版本数据、手工改库）也按"没有记忆"处理：记忆可以从聊天记录重建，
+    下一次 save_memory 会覆盖它；不能让一行坏 JSON 把该会话此后每一次提问都变成整页异常。
+    """
     with _connect() as con:
         row = con.execute(
             "SELECT memory_json FROM chat_memory WHERE session_id = ?", [session_id]
         ).fetchone()
-    return json.loads(row[0]) if row and row[0] is not None else None
+    if not row or row[0] is None:
+        return None
+    try:
+        return json.loads(row[0])
+    except (TypeError, ValueError):
+        return None
 
 
 def save_memory(session_id: str, payload: dict) -> None:
