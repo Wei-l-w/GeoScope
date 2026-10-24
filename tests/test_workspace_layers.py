@@ -199,16 +199,17 @@ def test_result_chips_use_the_same_names_as_the_layer_buttons(store, geojson):
 
 
 def test_a_reused_file_is_not_mislabelled_on_the_earlier_answer(store, geojson):
-    # 追问"把刚才的图显示出来"会原样复用上一轮的文件：图层只属于最后一轮，
-    # 第 1 轮回答下面不能写上"第 2 轮"的按钮名。
-    shared = geojson("shared", [BUFFER])
-    sid = _session(store, [[shared], [shared]])
+    # 追问"把刚才的图显示出来"会原样复用上一轮的文件。两个文件都复用、才会出现重名编号，
+    # 而图层只归最后一轮：第 1 轮回答下面不能借用"第 2 轮"的按钮名。
+    north, south = geojson("north", [BUFFER]), geojson("south", [BUFFER])
+    sid = _session(store, [[north, south], [north, south]])
     app = _open(_app(), sid)
 
-    assert app.pills[0].options == ["缓冲区 150 km"]  # 同一个文件只出一个图层，没有重名可加编号
+    assert app.pills[0].options == ["缓冲区 150 km · 第 2 轮 · 1", "缓冲区 150 km · 第 2 轮 · 2"]
     chips = [str(item.value) for item in app.chat_message[1].markdown if "gs-results" in str(item.value)]
-    assert len(chips) == 1
-    assert "第" not in chips[0]
+    assert len(chips) == 1  # 第 1 轮回答下面
+    assert "第 2 轮" not in chips[0]
+    assert chips[0].count("缓冲区 150 km") == 2  # 两个文件都有色块，只是不带别人的编号
 
 
 def test_a_crash_after_a_tool_produced_a_map_keeps_that_map(store, geojson, monkeypatch):

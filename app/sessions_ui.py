@@ -85,11 +85,16 @@ def render_memory(sid: str | None, busy: bool) -> None:
     """会话记忆始终按会话 ID 读取，切换会话时不会沿用其他会话的状态。"""
     try:
         memory = conversation.get_memory(sid) if sid else {}
-    except ValueError:
-        # 另一个标签页刚删掉当前会话：退回空的新会话，别让整页红屏。草稿留在输入框里。
-        st.session_state.agent_messages = []
-        st.session_state.current_session_id = None
-        memory = {}
+    except ValueError as exc:
+        if sid and not sessions_mod.session_exists(sid):
+            # 另一个标签页刚删掉当前会话：退回空的新会话，别让整页红屏。草稿留在输入框里。
+            st.session_state.agent_messages = []
+            st.session_state.current_session_id = None
+            sid, memory = None, {}
+        else:
+            # 记忆内容损坏（旧版本数据、手工改库）不等于会话消失：聊天记录还在，不能静默踢回空会话
+            st.error(f"本会话的记忆无法读取，暂时按空记忆继续：{exc}")
+            memory = {}
     state = memory.get("state") or {}
     summary = memory.get("summary") or ""
     with st.container(border=True, key="memory_card"):

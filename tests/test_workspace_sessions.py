@@ -109,6 +109,24 @@ def test_session_deleted_in_another_tab_falls_back_to_a_new_one(store):
     assert "还没有历史会话" in _captions(app)
 
 
+def test_corrupted_memory_is_reported_without_hiding_the_chat(store):
+    # 记忆行损坏（旧版本数据、手工改库）不是"会话被删"：聊天记录要留着，并明说记忆读不了
+    import duckdb
+
+    sid = _chat(store, "记忆损坏")
+    app = _open(_app(), sid)
+    with duckdb.connect(str(store.DB_PATH)) as con:
+        con.execute("INSERT INTO chat_memory (session_id, memory_json, cutoff_seq) VALUES (?, ?, 0) "
+                    "ON CONFLICT (session_id) DO UPDATE SET memory_json = excluded.memory_json",
+                    [sid, "{not json"])
+
+    app.run()
+    assert not app.exception
+    assert app.session_state["current_session_id"] == sid  # 不能当成"会话被删"静默清空
+    assert len(app.chat_message) == 2
+    assert any("记忆无法读取" in str(item.value) for item in app.error)
+
+
 def _ghost_page(sid):
     import streamlit as st
 
@@ -164,13 +182,15 @@ def test_every_control_is_disabled_while_an_analysis_runs(store):
     assert all(block.proto.popover.disabled for block in app.get("popover"))
 
 
-def test_a_run_disables_the_sidebar_and_the_layer_bar_end_to_end(store, monkeypatch):
+def test_a_run_disables_every_interactive_block_end_to_end(store, monkeypatch):
     # _busy_page 直接以 busy=True 调各区块，接线断了也不会红；这里提交一次真实问题，
-    # 检查工作台在同一次运行里确实把 busy=True 传给了侧栏与图层栏。
-    from app import map_view, sessions_ui
+    # 检查工作台在同一次运行里确实把 busy=True 传给了每个会画可交互控件的地方——
+    # 少传一处，那个按钮就会在分析进行中活着，点一下就会中止本轮。
+    from app import chat_ui, map_view, sessions_ui
 
     seen = []
     real_render, real_bar = sessions_ui.render, map_view.render_bar
+    real_header, real_message = chat_ui.header, chat_ui.render_message
 
     def spy_render(busy):
         seen.append(("sidebar", busy))
@@ -180,20 +200,65 @@ def test_a_run_disables_the_sidebar_and_the_layer_bar_end_to_end(store, monkeypa
         seen.append(("bar", busy))
         return real_bar(state, sid, busy)
 
+    def spy_header(title, subtitle, sid, busy):
+        seen.append(("header", busy))
+        return real_header(title, subtitle, sid, busy)
+
+    def spy_message(message, mode, **kwargs):
+        seen.append(("message", kwargs.get("busy", False)))
+        return real_message(message, mode, **kwargs)
+
     def fake_stream(prompt, history=None, session_id=None):
         yield {"type": "thinking", "step": 1}
         yield {"type": "answer", "result": react.AgentResult(question=prompt, answer="分析完成。")}
 
     monkeypatch.setattr(sessions_ui, "render", spy_render)
     monkeypatch.setattr(map_view, "render_bar", spy_bar)
+    monkeypatch.setattr(chat_ui, "header", spy_header)
+    monkeypatch.setattr(chat_ui, "render_message", spy_message)
     monkeypatch.setattr(react, "stream", fake_stream)
 
     app = _app()
     seen.clear()
     app.chat_input(key="geoagent_prompt").set_value("曼德海峡周边有哪些事件？").run()
     assert not app.exception
-    assert ("sidebar", True) in seen
-    assert ("bar", True) in seen
+    for block in ("sidebar", "bar", "header", "message"):
+        assert (block, True) in seen, (block, seen)
+
+
+def test_clearing_memory_of_a_deleted_session_does_not_raise(store):
+    # 列表是上一次重跑画的，点"清空分析记忆"时另一个标签页可能已经删了它
+    app = AppTest.from_function(_clear_memory_page, args=("not-a-real-session",), default_timeout=20).run()
+    assert not app.exception
+    assert "ok" in str(app.markdown[0].value)
+
+
+def _clear_memory_page(sid):
+    import streamlit as st
+
+    from app import sessions_ui
+
+    sessions_ui._clear_memory(sid)
+    st.write("ok")
+
+
+def test_a_run_keeps_the_answer_when_the_session_is_deleted_midway(store, monkeypatch):
+    # 分析几十秒里，另一个标签页把这个会话删了：写回会抛 ValueError。
+    # 用户必须还能读到刚生成的回答，而不是整页 traceback。
+    def deleting_stream(prompt, history=None, session_id=None):
+        store.delete_session(session_id)  # 模拟另一个标签页在分析期间删除
+        yield {"type": "thinking", "step": 1}
+        yield {"type": "answer", "result": react.AgentResult(question=prompt, answer="这是本轮的回答。")}
+
+    monkeypatch.setattr(react, "stream", deleting_stream)
+    app = _app()
+    app.chat_input(key="geoagent_prompt").set_value("曼德海峡周边有哪些事件？").run()
+
+    assert not app.exception
+    assert app.session_state["current_session_id"] is None  # 已退回空会话，不再指向死数据
+    text = "\n".join(str(item.value) for item in app.markdown) + "\n".join(str(item.value) for item in app.warning)
+    assert "这是本轮的回答。" in text
+    assert "另一个标签页" in text
 
 
 def test_composer_keeps_the_submit_locked_until_the_turn_ends(store):
