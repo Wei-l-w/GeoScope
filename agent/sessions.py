@@ -157,6 +157,19 @@ def load_messages(session_id: str) -> list[dict]:
         return _load_messages(con, session_id)
 
 
+def _list_field(raw: str | None) -> list:
+    """消息行里的 JSON 附件（步骤、产物路径、工具记录）。
+
+    单行损坏只丢这一行的附件：会话必须还能打开，此后的提问也必须还能执行。
+    让一行坏 JSON 把 load_messages 整体抛掉，用户就再也点不开这个会话、也没法删它。
+    """
+    try:
+        value = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return []
+    return value if isinstance(value, list) else []
+
+
 def _load_messages(con: duckdb.DuckDBPyConnection, session_id: str, cutoff: int = 0) -> list[dict]:
     rows = con.execute(
         "SELECT seq, role, content, steps_json, geojson_json, tool_records_json, error, reply_to_seq "
@@ -168,9 +181,9 @@ def _load_messages(con: duckdb.DuckDBPyConnection, session_id: str, cutoff: int 
             "seq": seq,
             "role": role,
             "content": content,
-            "steps": json.loads(steps or "[]"),
-            "geojson": json.loads(geo or "[]"),
-            "tool_records": json.loads(records or "[]"),
+            "steps": _list_field(steps),
+            "geojson": _list_field(geo),
+            "tool_records": _list_field(records),
             "error": error,
             "reply_to_seq": reply_to_seq,
         }
