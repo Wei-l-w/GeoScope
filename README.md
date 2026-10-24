@@ -17,7 +17,7 @@
 
 工作台：侧栏列出最近会话，点一下即可打开；对话与地图左右两栏、高度随窗口填满，窗口 1000px 及以下时改为上下排列。每轮分析产出的缓冲区、事件点、航迹各自成为一个图层，在会话内累积、可单独开关；新结果到达时地图自动定位，“复位”回到最新结果的范围。工具明细默认收在“分析过程”里；分析进行中其余控件暂时置灰，避免误触打断。
 
-示例问题先填入可编辑草稿，确认发送后才开始分析。被中断、没有得到回答的提问会标注出来，可一键重新填入。侧栏“本会话记忆”可查看与清空，错误回复会保存并明确标记为未完成。地图结果提供 GeoJSON 下载。深浅主题由 Streamlit 原生配置提供：默认跟随系统，右上角 ⋮ 的设置菜单可切换 System / Light / Dark；若部署时把 `client.toolbarMode` 设为 `minimal`，该菜单会被隐藏，主题改由 `config.toml` 决定。要求 Streamlit 1.59 及以上。
+示例问题先填入可编辑草稿，确认发送后才开始分析。被中断、没有得到回答的提问会标注出来，可一键重新填入。侧栏“本会话记忆”可查看与清空，错误回复会保存并明确标记为未完成。地图结果提供 GeoJSON 下载。深浅主题由 Streamlit 原生配置提供：默认跟随系统，右上角 ⋮ 的设置菜单可切换 System / Light / Dark。若部署时把 `client.toolbarMode` 设为 `minimal`，该菜单会被隐藏，界面仍跟随系统深浅色（两套配色仍来自 `config.toml`）；要把主题固定在一种，请在 `config.toml` 里只保留一套 `[theme]` 配色，去掉 `[theme.light]` / `[theme.dark]` 子表。要求 Streamlit 1.59 及以上。
 
 地图只接收实际工具生成、通过路径与几何校验的本地 GeoJSON。明确上图请求若没有真实产物，会要求模型实际执行一次，仍未生成则报告失败；文件缺失/损坏会显示原因。合法的零事件缓冲区仍显示范围；说一句“显示上次的地图”即可恢复本会话最近一次生成的地图，无需额外模型调用。
 
@@ -67,6 +67,7 @@ pip install -r requirements.txt
 #   MODEL_NAME=deepseek-chat
 
 # 1. 生成仿真样例数据并入库（真实数据到位前先跑通全流程）
+#    用过旧版样例建过库的，先删掉 data/warehouse.duckdb 再按下面重建，避免旧档案残留
 python scripts/generate_sample_data.py
 python -m ingest.load ais        data/raw/ais_sample.csv
 python -m ingest.load ais_static data/raw/ais_static_sample.csv
@@ -146,7 +147,7 @@ python -m ingest.load news       '<新闻正文抓取结果>.jsonl'
 
 ```bash
 python -m pytest tests/ -q    # 离线回归，无需 LLM
-python scripts/smoke_test.py  # 首页及六个业务页初始化，会话库使用临时目录
+python scripts/smoke_test.py  # 工作台及六个看板页初始化，会话库使用临时目录
 ```
 
 GitHub Actions（`.github/workflows/ci.yml`）：checkout → 安装依赖 → 样例数据建库 → compileall + pytest + 七页初始化，推送即跑。
@@ -191,7 +192,7 @@ GitHub Actions（`.github/workflows/ci.yml`）：checkout → 安装依赖 → �
 ├── app/map_view.py     # 图层拆分、累积、开关、视野、图例、下载
 ├── app/palette.py      # 数据配色：分类色板与有序/发散/顺序色阶
 ├── app/theme_watch.py  # 读取浏览器当前深浅主题，供地图图层取色
-├── app/ui.py           # 看板共用组件：页头、KPI、图例、地图与图表封装
+├── app/ui.py           # 各页共用组件：页头、KPI、图例、地图与图表封装
 ├── app/db.py           # 看板只读查询（带缓存的 DuckDB 连接）
 ├── app/styles/         # 设计令牌与工作台布局 CSS
 ├── app/dashboards/     # 总览 / AIS / ACLED / 时空叠加 / 新闻检索 / 全球背景参考
@@ -206,9 +207,13 @@ GitHub Actions（`.github/workflows/ci.yml`）：checkout → 安装依赖 → �
 │   ├── sessions.py     # 会话持久化（独立 duckdb）
 │   ├── memory.py       # 本地滚动摘录、分析状态与条件来源
 │   ├── conversation.py # 记忆持久化与模型上下文整合
+│   ├── chat.py         # CLI 入口（python -m agent.chat）
+│   ├── config.py       # 环境变量与路径集中配置
+│   ├── db.py           # DuckDB 连接、spatial 扩展与 schema 抽取
 │   └── eval.py         # 执行准确率评测器
 ├── ingest/             # 入库脚本；mappings.py 是字段映射配置
 ├── eval/               # 评测集 + 报告
+├── scripts/            # 样例数据生成、七页冒烟测试、截图与录屏
 ├── tests/              # 离线单测（无需 LLM）
 ├── db/schema.sql       # 数据仓库表结构
 └── data/               # DuckDB 仓库与索引（gitignore，不入库）
