@@ -46,6 +46,26 @@ def _message_text(message):
     )
 
 
+def _process_block(message):
+    """消息里的“分析过程”折叠区。
+
+    AppTest 对折叠区的归类随版本变化：1.64 及以前只要有图标就归为 Status，
+    1.65 起改为看状态字段——只有 st.status 是 Status，带图标的 st.expander 变成 Expander。
+    这里两处都找，断言的是折叠区本身，不是测试库的内部归类。
+    """
+    block = next((item for item in [*message.status, *message.expander]
+                  if item.label.startswith("分析过程")), None)
+    assert block is not None, "回答下方应保留分析过程折叠区"
+    return block
+
+
+def _session_state(app):
+    """AppTest 的状态视图。较早的版本直接暴露 SafeSessionState.filtered_state，
+    较新的版本换成 _AppTestSessionState，只提供 to_dict()。"""
+    state = getattr(app.session_state, "filtered_state", None)
+    return app.session_state.to_dict() if state is None else state
+
+
 def test_examples_only_fill_draft_without_creating_session(chat_db, monkeypatch):
     def forbidden_stream(*args, **kwargs):
         raise AssertionError("点击示例只能填入草稿，不能直接运行分析")
@@ -103,8 +123,8 @@ def test_submit_persists_reply_and_tool_evidence(chat_db, monkeypatch):
     assert stored[1]["error"] is None
     assert app.session_state["agent_messages"][1]["tool_records"] == records
     assert "已完成这艘船的航迹分析。" in _message_text(app.chat_message[1])
-    # 带图标的 st.expander 在 AppTest 里归为 Status（st.status 就是带图标的折叠区）
-    process = app.chat_message[1].status[0]
+    # 带图标的折叠区在不同 Streamlit 版本里被分到 Status 或 Expander
+    process = _process_block(app.chat_message[1])
     assert process.label == "分析过程 · 1 步 · 查询船舶航迹"
     assert not process.proto.expanded
 
@@ -185,6 +205,6 @@ def test_new_chat_clears_draft_and_legacy_pending_question(chat_db, monkeypatch)
     assert app.session_state["current_session_id"] is None
     assert not app.chat_message
     assert not app.chat_input(key="geoagent_prompt").value
-    assert not app.session_state.filtered_state.get("_pending_question")
+    assert not _session_state(app).get("_pending_question")
     assert len(chat_db.list_sessions()) == 1
     assert chat_db.load_messages(sid)[0]["content"] == "旧问题"
