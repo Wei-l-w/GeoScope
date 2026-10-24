@@ -232,6 +232,16 @@ def memory_messages(session_id: str) -> list[dict]:
         ]
 
 
+def session_exists(session_id: str) -> bool:
+    """另一个标签页可能刚把它删掉：先问一句，避免点开或被恢复的会话在后端报"会话不存在"。"""
+    if not session_id or not DB_PATH.exists():
+        return False
+    with _connect() as con:
+        return bool(con.execute(
+            "SELECT 1 FROM chat_sessions WHERE session_id = ?", [session_id]
+        ).fetchone())
+
+
 def delete_session(session_id: str) -> None:
     with _connect() as con:
         con.execute("DELETE FROM chat_memory WHERE session_id = ?", [session_id])

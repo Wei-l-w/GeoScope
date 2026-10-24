@@ -41,6 +41,9 @@ def start_new() -> None:
 
 
 def open_session(sid: str) -> None:
+    if not sessions_mod.session_exists(sid):  # 另一个标签页刚删掉它：当作新会话，别让页面红屏
+        start_new()
+        return
     st.session_state.agent_messages = sessions_mod.load_messages(sid)
     st.session_state.current_session_id = sid
     clear_draft()
@@ -52,7 +55,8 @@ def delete_current(sid: str) -> None:
 
 
 def _clear_memory(sid: str) -> None:
-    sessions_mod.clear_memory(sid)
+    if sessions_mod.session_exists(sid):
+        sessions_mod.clear_memory(sid)
 
 
 def render(busy: bool) -> dict:
@@ -79,7 +83,13 @@ def render(busy: bool) -> dict:
 
 def render_memory(sid: str | None, busy: bool) -> None:
     """会话记忆始终按会话 ID 读取，切换会话时不会沿用其他会话的状态。"""
-    memory = conversation.get_memory(sid) if sid else {}
+    try:
+        memory = conversation.get_memory(sid) if sid else {}
+    except ValueError:
+        # 另一个标签页刚删掉当前会话：退回空的新会话，别让整页红屏。草稿留在输入框里。
+        st.session_state.agent_messages = []
+        st.session_state.current_session_id = None
+        memory = {}
     state = memory.get("state") or {}
     summary = memory.get("summary") or ""
     with st.container(border=True, key="memory_card"):

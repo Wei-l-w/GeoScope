@@ -52,15 +52,18 @@ with header_slot:
 # 先算出图层，回答末尾的结果标签才能照抄图层按钮的名字（含"第 N 轮"）；只读数据，不出界面。
 turn_paths = map_view.turns(messages)
 state = map_view.build(turn_paths, map_view.reset_count())
-labels = {(layer.path, layer.kind): layer.label for layer in state.layers}
+labels = {(layer.turn, layer.path, layer.kind): layer.label for layer in state.layers}
 
 interrupted = chat_ui.unanswered(messages)
 with history:
     if not messages and not busy:
         chat_ui.welcome(busy)
+    turn = 0
     for message in messages:
+        if message.get("role") == "assistant":  # 与 map_view.turns() 同口径：助手回答的序号
+            turn += 1
         chat_ui.render_message(message, mode, interrupted=message.get("seq") in interrupted, busy=busy,
-                               labels=labels)
+                               labels=labels, turn=turn)
 
 with bar_slot:
     visible = map_view.render_bar(state, sid, busy)
@@ -126,6 +129,9 @@ def run_analysis(question: str, sid: str) -> dict:
         if not got_answer and not error:
             error = "分析结束但没有返回最终回答"
             answer = "本轮没有生成完整回答，请重新提问。"
+        # 已经产出、并且刚刚画到地图上的文件仍然属于本轮：工具成功之后才失败时，
+        # 不能让用户刚看到的图层随回答一起消失，也不能让下载列表里查无此文件。
+        paths = paths or list(dict.fromkeys(live_paths))
         status.update(label="分析未完成" if error else "分析完成", state="error" if error else "complete")
         st.markdown(answer)
     return {"role": "assistant", "content": answer, "steps": steps, "geojson": paths,

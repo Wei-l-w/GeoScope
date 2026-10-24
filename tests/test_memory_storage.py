@@ -106,6 +106,23 @@ def test_delete_session_removes_memory_and_messages_only_for_that_session(store)
         assert con.execute("SELECT COUNT(*) FROM chat_memory WHERE session_id = ?", [target]).fetchone()[0] == 0
 
 
+def test_session_exists_tracks_creation_and_deletion(store, tmp_path):
+    # 前端在"点开 / 恢复当前会话"之前先问一句，避免另一个标签页删掉后整页抛 ValueError
+    absent = tmp_path / "nothing.duckdb"
+    original = store.DB_PATH
+    try:
+        store.DB_PATH = absent
+        assert store.session_exists("anything") is False  # 会话库还没建
+        store.DB_PATH = original
+        sid = store.create_session("存在的会话")
+        assert store.session_exists(sid) is True
+        assert store.session_exists("") is False
+        store.delete_session(sid)
+        assert store.session_exists(sid) is False
+    finally:
+        store.DB_PATH = original
+
+
 @pytest.mark.parametrize("operation", [
     lambda store: store.save_message("missing", "user", "孤儿"),
     lambda store: store.save_memory("missing", {"summary": "孤儿"}),

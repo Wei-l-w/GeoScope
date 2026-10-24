@@ -139,13 +139,15 @@ def test_new_layers_show_by_default_while_hidden_ones_stay_hidden(store, geojson
 
 
 EXPLOSION = _feature("Point", [43.3, 12.6], event_type="Explosions/Remote violence")
-GDELT_POINT = _feature("Point", [43.4, 12.7], event_code="190", country="Yemen")
+# GDELT 的 event_type 是事件编码（buffer_analysis 把 event_code 起别名成 event_type），
+# 仍然算事件点，但取不到 ACLED 的类型色 —— 地图画空心环。
+GDELT_POINT = _feature("Point", [43.4, 12.7], event_type="190", date="2023-12-15", location="Yemen")
 
 
-def _chips_page(message, mode):
+def _chips_page(message, mode, turn):
     from app import chat_ui
 
-    chat_ui.render_message(message, mode)
+    chat_ui.render_message(message, mode, turn=turn)
 
 
 def _chips(app):
@@ -155,18 +157,21 @@ def _chips(app):
 def test_result_chip_colour_follows_the_event_type_on_the_map(geojson):
     # 地图按事件类型上色；标签不能一律画成"武装冲突"的粉色
     message = {"role": "assistant", "content": "已统计。", "geojson": [geojson("explosions", [EXPLOSION])]}
-    app = AppTest.from_function(_chips_page, args=(message, "light"), default_timeout=20).run()
+    app = AppTest.from_function(_chips_page, args=(message, "light", 1), default_timeout=20).run()
 
     assert not app.exception
     assert "background:#EA580C" in _chips(app)
 
 
-def test_result_chip_for_non_acled_points_is_an_outlined_ring(geojson):
+def test_result_chip_for_non_acled_events_is_an_outlined_ring(geojson):
     message = {"role": "assistant", "content": "已查询。", "geojson": [geojson("gdelt", [GDELT_POINT])]}
-    app = AppTest.from_function(_chips_page, args=(message, "light"), default_timeout=20).run()
+    app = AppTest.from_function(_chips_page, args=(message, "light", 1), default_timeout=20).run()
 
     assert not app.exception
-    assert 'class="ring"' in _chips(app)
+    chips = _chips(app)
+    assert 'class="ring"' in chips
+    # fixture 一旦丢掉 event_type 就会被拆成 points（"查询结果 · 1 点"），那时这条断言会拦下来
+    assert "查询结果" not in chips
 
 
 def test_chips_with_the_same_name_in_one_answer_are_numbered(store, geojson):
@@ -191,3 +196,41 @@ def test_result_chips_use_the_same_names_as_the_layer_buttons(store, geojson):
     chips = [str(item.value) for item in app.chat_message[1].markdown if "gs-results" in str(item.value)]
     assert len(chips) == 1
     assert "缓冲区 150 km · 第 1 轮" in chips[0]
+
+
+def test_a_reused_file_is_not_mislabelled_on_the_earlier_answer(store, geojson):
+    # 追问"把刚才的图显示出来"会原样复用上一轮的文件：图层只属于最后一轮，
+    # 第 1 轮回答下面不能写上"第 2 轮"的按钮名。
+    shared = geojson("shared", [BUFFER])
+    sid = _session(store, [[shared], [shared]])
+    app = _open(_app(), sid)
+
+    assert app.pills[0].options == ["缓冲区 150 km"]  # 同一个文件只出一个图层，没有重名可加编号
+    chips = [str(item.value) for item in app.chat_message[1].markdown if "gs-results" in str(item.value)]
+    assert len(chips) == 1
+    assert "第" not in chips[0]
+
+
+def test_a_crash_after_a_tool_produced_a_map_keeps_that_map(store, geojson, monkeypatch):
+    # 工具成功、地图已经画出来之后流才断：本轮产物属于这一轮，不能让图层随异常一起消失
+    produced = geojson("partial", [BUFFER])
+
+    def crashing_stream(prompt, history=None, session_id=None):
+        yield {"type": "thinking", "step": 1}
+        yield {"type": "tool_start", "name": "buffer_analysis",
+               "args": {"lat": 12.6, "lon": 43.3, "radius_km": 150}, "step": 1, "blocked": False}
+        yield {"type": "tool_end", "name": "buffer_analysis", "output": "GeoJSON 已保存：" + produced,
+               "blocked": False, "geojson_path": produced}
+        raise RuntimeError("模拟连接中断")
+
+    monkeypatch.setattr(react, "stream", crashing_stream)
+    app = _app()
+    app.chat_input(key="geoagent_prompt").set_value("曼德海峡周边150公里内的事件").run()
+    app.run()
+    assert not app.exception
+    stored = store.load_messages(app.session_state["current_session_id"])
+    assert stored[-1]["geojson"] == [produced]
+    assert stored[-1]["error"].startswith("分析中断")
+    assert app.pills[0].value == [f"{produced}#buffer"]
+    assert "本轮未生成可用地图" not in _captions(app)
+    assert "1 个图层 · 1 个要素" in _captions(app)

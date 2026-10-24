@@ -97,8 +97,10 @@ def header(title: str, subtitle: str, sid: str | None, busy: bool) -> None:
         with st.popover("", icon=":material/more_horiz:", type="tertiary", disabled=busy or not sid,
                         key="chat_menu"):
             st.caption("删除会同时移除本会话的聊天记录与记忆。")
+            # 菜单的 disabled 只禁用触发按钮：已展开的菜单体在前端保留，分析进行中照样能点进来，
+            # 所以里面这颗按钮必须自己置灰，否则一点就会中止本轮分析并删掉会话。
             st.button("删除会话", key="delete_session", icon=":material/delete:", width="stretch",
-                      on_click=sessions_ui.delete_current, args=(sid,))
+                      disabled=busy or not sid, on_click=sessions_ui.delete_current, args=(sid,))
 
 
 def welcome(busy: bool) -> None:
@@ -150,12 +152,11 @@ def _swatch(kind: str, features: list, mode: str) -> str:
     return f'<i class="ring" style="border-color:{colors["ring"]}"></i>'
 
 
-def _layers(message: dict, labels: dict | None) -> list[tuple[str, list, str]]:
-    """本轮产生的图层 [(种类, 要素, 名称)]。labels 是图层栏实际用的名称（{(路径, 种类): 名称}），
-    有就照抄，保证标签和按钮一字不差；没有图层栏时（单独渲染一条消息）按同样的命名规则现算。"""
+def _layers(message: dict, labels: dict | None, turn: int | None) -> list[tuple[str, list, str]]:
+    """本轮产生的图层 [(种类, 要素, 名称)]。labels 是图层栏实际用的名称（{(轮次, 路径, 种类): 名称}），
+    按轮次查：同一条路径若被后面的回答原样复用，图层只属于最后一轮，前一轮没有自己的按钮可抄，
+    就退回不带编号的基本名，不能把"第 2 轮"写到第 1 轮的回答下面。"""
     paths = list(dict.fromkeys(message.get("geojson") or []))
-    if labels is None:
-        labels = {(layer.path, layer.kind): layer.label for layer in map_view.build([(1, paths)]).layers}
     groups = []
     for path in paths:
         try:
@@ -163,21 +164,21 @@ def _layers(message: dict, labels: dict | None) -> list[tuple[str, list, str]]:
         except artifacts.ArtifactError:
             continue
         for kind, features in map_view.split(data):
-            label = labels.get((path, kind)) or map_view.layer_label(kind, features)
-            groups.append((kind, features, label))
+            groups.append((kind, features, (labels or {}).get((turn, path, kind))
+                           or map_view.layer_label(kind, features)))
     return groups
 
 
-def result_chips(message: dict, mode: str, labels: dict | None = None) -> None:
+def result_chips(message: dict, mode: str, labels: dict | None = None, turn: int | None = None) -> None:
     """本轮产生的图层：名称与图层按钮一致，色块与地图同色。"""
     chips = [f'<span class="gs-result">{_swatch(kind, features, mode)}{html.escape(label)}</span>'
-             for kind, features, label in _layers(message, labels)]
+             for kind, features, label in _layers(message, labels, turn)]
     if chips:
         st.markdown(f'<div class="gs-results">{"".join(chips)}</div>', unsafe_allow_html=True)
 
 
 def render_message(message: dict, mode: str, *, interrupted: bool = False, busy: bool = False,
-                   labels: dict | None = None) -> None:
+                   labels: dict | None = None, turn: int | None = None) -> None:
     is_user = message.get("role") == "user"
     with st.chat_message("user" if is_user else "assistant", avatar="user" if is_user else ASSISTANT_AVATAR):
         content = message.get("content") or "本轮没有生成回答。"
@@ -190,6 +191,6 @@ def render_message(message: dict, mode: str, *, interrupted: bool = False, busy:
             return
         render_process(message)
         st.markdown(clean_assistant_text(content))
-        result_chips(message, mode, labels)
+        result_chips(message, mode, labels, turn)
         if message.get("error"):
             st.caption("本轮分析未完成，可调整问题后重试。")
