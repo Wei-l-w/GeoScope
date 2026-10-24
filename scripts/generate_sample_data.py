@@ -45,11 +45,11 @@ PORTS = ["Hodeidah", "Aden", "Jeddah", "Djibouti"]
 
 
 def gen_ais():
-    """~ 分隔无表头 12 列，字段与真实 AIS 导出格式一致（原始单位）。"""
-    ship_types = [30, 35, 70, 80, 52]  # 渔船/军用/货船/油轮/拖轮 类型码
-    rows = []
+    """~ 分隔无表头 12 列，字段与真实 AIS 导出格式一致（原始单位）。返回这批船的 MMSI。"""
+    rows, mmsis = [], []
     for i in range(24):
         mmsi = 200000000 + i * 1111 + int(rng.integers(0, 999))
+        mmsis.append(mmsi)
         _, lat0, lon0 = SEA_REGIONS[i % len(SEA_REGIONS)]
         lat, lon = lat0 + rng.uniform(-1.5, 1.5), lon0 + rng.uniform(-1.5, 1.5)
         heading = rng.uniform(0, 360)
@@ -73,14 +73,18 @@ def gen_ais():
         for r in rows:
             f.write("~".join(str(x) for x in r) + "\n")
     print(f"AIS: {len(rows)} 行 -> data/raw/ais_sample.csv（~ 分隔无表头）")
+    return mmsis
 
 
-def gen_ais_static():
-    """静态档案 ~ 分隔无表头 17 列，与 ais_static 映射一致。"""
+def gen_ais_static(mmsis):
+    """静态档案 ~ 分隔无表头 17 列，与 ais_static 映射一致。
+
+    MMSI 必须复用 gen_ais() 那一批：两侧各自抽随机数会得到两个不相交的集合，
+    入库后 LEFT JOIN 一条都对不上，AIS 页的船名筛选永远是空的。
+    """
     type_map = [(30, "渔船"), (35, "军用船"), (70, "货船"), (80, "油轮"), (52, "拖轮")]
     rows = []
-    for i in range(24):
-        mmsi = 200000000 + i * 1111 + int(rng.integers(0, 999))
+    for i, mmsi in enumerate(mmsis):
         type_code, _ = type_map[i % len(type_map)]
         length = int(rng.integers(60, 330))
         rows.append([
@@ -232,8 +236,7 @@ def gen_news(acled_ids):
 
 
 if __name__ == "__main__":
-    gen_ais()
-    gen_ais_static()
+    gen_ais_static(gen_ais())
     gen_gdelt()
     gen_acled()
     ids = [f"YE{10000 + i}" for i in range(50)]
