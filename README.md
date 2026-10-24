@@ -15,11 +15,11 @@
 | ![缓冲区分析](docs/demo-buffer.gif) | ![船舶航迹](docs/demo-track.gif) | ![知识库问答](docs/demo-rag.gif) |
 | "曼德海峡周边 150km 内发生了多少起事件？" | "MMSI 668116204 最近 30 天走了什么路线？" | "银河领袖号事件有什么背景？" |
 
-工作台：侧栏列出最近会话，点一下即可打开；对话与地图左右两栏、高度随窗口填满，窄于 1000px 时改为上下排列。每轮分析产出的缓冲区、事件点、航迹各自成为一个图层，在会话内累积、可单独开关；新结果到达时地图自动定位，“复位”回到最新结果的范围。工具明细默认收在“分析过程”里；分析进行中其余控件暂时置灰，避免误触打断。
+工作台：侧栏列出最近会话，点一下即可打开；对话与地图左右两栏、高度随窗口填满，窗口 1000px 及以下时改为上下排列。每轮分析产出的缓冲区、事件点、航迹各自成为一个图层，在会话内累积、可单独开关；新结果到达时地图自动定位，“复位”回到最新结果的范围。工具明细默认收在“分析过程”里；分析进行中其余控件暂时置灰，避免误触打断。
 
-示例问题先填入可编辑草稿，确认发送后才开始分析。被中断、没有得到回答的提问会标注出来，可一键重新填入。侧栏“本会话记忆”可查看与清空，错误回复会保存并明确标记为未完成。地图结果提供 GeoJSON 下载。深浅主题由 Streamlit 原生配置提供，设置菜单（右上角 ⋮）可切换 System / Light / Dark，默认跟随系统。要求 Streamlit 1.59 及以上。
+示例问题先填入可编辑草稿，确认发送后才开始分析。被中断、没有得到回答的提问会标注出来，可一键重新填入。侧栏“本会话记忆”可查看与清空，错误回复会保存并明确标记为未完成。地图结果提供 GeoJSON 下载。深浅主题由 Streamlit 原生配置提供：默认跟随系统，右上角 ⋮ 的设置菜单可切换 System / Light / Dark；若部署时把 `client.toolbarMode` 设为 `minimal`，该菜单会被隐藏，主题改由 `config.toml` 决定。要求 Streamlit 1.59 及以上。
 
-地图只接收实际工具生成、通过路径与几何校验的本地 GeoJSON。明确上图请求若没有真实产物，会要求模型实际执行一次，仍未生成则报告失败；文件缺失/损坏会显示原因。合法的零事件缓冲区仍显示范围，查看上次有效地图可直接恢复，无需额外模型调用。
+地图只接收实际工具生成、通过路径与几何校验的本地 GeoJSON。明确上图请求若没有真实产物，会要求模型实际执行一次，仍未生成则报告失败；文件缺失/损坏会显示原因。合法的零事件缓冲区仍显示范围；说一句“显示上次的地图”即可恢复本会话最近一次生成的地图，无需额外模型调用。
 
 ## 架构
 
@@ -68,10 +68,11 @@ pip install -r requirements.txt
 
 # 1. 生成仿真样例数据并入库（真实数据到位前先跑通全流程）
 python scripts/generate_sample_data.py
-python -m ingest.load ais   data/raw/ais_sample.csv
-python -m ingest.load gdelt data/raw/gdelt_sample.csv
-python -m ingest.load acled data/raw/acled_sample.csv
-python -m ingest.load news  data/raw/news_sample.jsonl
+python -m ingest.load ais        data/raw/ais_sample.csv
+python -m ingest.load ais_static data/raw/ais_static_sample.csv
+python -m ingest.load gdelt      data/raw/gdelt_sample.csv
+python -m ingest.load acled      data/raw/acled_sample.csv
+python -m ingest.load news       data/raw/news_sample.jsonl
 
 # 2. 构建 RAG 索引
 python -m agent.rag --rebuild
@@ -190,12 +191,16 @@ GitHub Actions（`.github/workflows/ci.yml`）：checkout → 安装依赖 → �
 ├── app/map_view.py     # 图层拆分、累积、开关、视野、图例、下载
 ├── app/palette.py      # 数据配色：分类色板与有序/发散/顺序色阶
 ├── app/theme_watch.py  # 读取浏览器当前深浅主题，供地图图层取色
+├── app/ui.py           # 看板共用组件：页头、KPI、图例、地图与图表封装
+├── app/db.py           # 看板只读查询（带缓存的 DuckDB 连接）
 ├── app/styles/         # 设计令牌与工作台布局 CSS
 ├── app/dashboards/     # 总览 / AIS / ACLED / 时空叠加 / 新闻检索 / 全球背景参考
 ├── agent/              # 智能体核心
 │   ├── react.py        # ReAct 主循环（流式事件）
 │   ├── tools.py        # 5 个 GIS/查数/RAG 工具（插件化注册）
+│   ├── artifacts.py    # 地图产物校验：路径必须在本项目输出目录、几何必须合法
 │   ├── geosql.py       # Text-to-GeoSQL 链（schema linking + 自纠正）
+│   ├── sql_guard.py    # 模型 SQL 的执行边界：语法树校验、行数上限、超时中断
 │   ├── fewshot.py      # GeoSQL 错题本（检索式 few-shot）
 │   ├── rag.py          # RAG 知识库（嵌入后端抽象）
 │   ├── sessions.py     # 会话持久化（独立 duckdb）

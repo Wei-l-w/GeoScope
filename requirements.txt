@@ -1,3 +1,5 @@
+# 1.59 起才有本仓库用到的 chat_input(submit_mode=)、st.components.v2、水平容器与原生双主题子表。
+# 不设上限：AppTest 在 1.64/1.65 改过折叠区归类与会话状态视图，测试里已按版本兼容。
 streamlit>=1.59
 duckdb>=1.0
 pydeck>=0.9
