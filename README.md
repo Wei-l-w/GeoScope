@@ -15,9 +15,9 @@
 | ![缓冲区分析](docs/demo-buffer.gif) | ![船舶航迹](docs/demo-track.gif) | ![知识库问答](docs/demo-rag.gif) |
 | "曼德海峡周边 150km 内发生了多少起事件？" | "MMSI 668116204 最近 30 天走了什么路线？" | "银河领袖号事件有什么背景？" |
 
-对话工作台：左侧聊天独立滚动，输入区留在面板底部；用户消息与分析回答分层展示，工具明细默认收在“分析过程”中。右侧地图随几何结果即时更新，窄屏下改为上下布局。
+工作台：侧栏列出最近会话，点一下即可打开；对话与地图左右两栏、高度随窗口填满，窄于 1000px 时改为上下排列。每轮分析产出的缓冲区、事件点、航迹各自成为一个图层，在会话内累积、可单独开关；新结果到达时地图自动定位，“复位”回到最新结果的范围。工具明细默认收在“分析过程”里；分析进行中其余控件暂时置灰，避免误触打断。
 
-示例问题先填入可编辑草稿，确认发送后才开始分析。侧栏保留会话恢复与记忆查看，错误回复会保存并明确标记为未完成。地图结果提供 GeoJSON 下载。界面支持深浅主题，要求 Streamlit 1.52 及以上。
+示例问题先填入可编辑草稿，确认发送后才开始分析。被中断、没有得到回答的提问会标注出来，可一键重新填入。侧栏“本会话记忆”可查看与清空，错误回复会保存并明确标记为未完成。地图结果提供 GeoJSON 下载。深浅主题由 Streamlit 原生配置提供，设置菜单（右上角 ⋮）可切换 System / Light / Dark，默认跟随系统。要求 Streamlit 1.59 及以上。
 
 地图只接收实际工具生成、通过路径与几何校验的本地 GeoJSON。明确上图请求若没有真实产物，会要求模型实际执行一次，仍未生成则报告失败；文件缺失/损坏会显示原因。合法的零事件缓冲区仍显示范围，查看上次有效地图可直接恢复，无需额外模型调用。
 
@@ -54,7 +54,7 @@ Streamlit + deck.gl：GeoJSON 即时上图，"所问即所得"
 | GIS 工具链封装为 Tools/Plugins                  | 缓冲区 / 叠置统计 / 地理编码 / 航迹，点面运算全部 SQL 下推（千万行秒级）                                            | `agent/tools.py`                  |
 | Text-to-SQL / GeoSQL 准确率优化                | schema linking + 检索式 few-shot + 报错自纠正；**16 条执行准确率评测 16/16=100%**（[报告](eval/report.md)） | `agent/geosql.py` `agent/eval.py` |
 | 空间知识库 RAG                                 | 新闻正文切块 + 事件描述 → 3100+ 知识块，余弦 top-k 带引用；嵌入后端抽象可插拔                                       | `agent/rag.py`                    |
-| GeoJSON / deck.gl 可视化交互                   | 三类几何结果（圆/点/线）即时上图，流式工具调用可视化，多轮指代对话，会话持久化                                               | `app/GeoAgent.py`                 |
+| GeoJSON / deck.gl 可视化交互                   | 缓冲区 / 事件点 / 航迹按会话累积为可开关的图层，流式工具调用可视化，多轮指代对话，会话持久化                                     | `app/workspace.py` `app/map_view.py` |
 
 ## 快速开始
 
@@ -76,7 +76,7 @@ python -m ingest.load news  data/raw/news_sample.jsonl
 # 2. 构建 RAG 索引
 python -m agent.rag --rebuild
 
-# 3. 启动（GeoAgent 即首屏）
+# 3. 启动（首屏为工作台，顶部导航进入各看板页）
 streamlit run app/GeoAgent.py
 ```
 
@@ -183,8 +183,15 @@ GitHub Actions（`.github/workflows/ci.yml`）：checkout → 安装依赖 → �
 ## 项目结构
 
 ```
-├── app/GeoAgent.py     # GeoAgent 首屏（对话 + 流式工具可视化 + 即时上图）
-├── app/pages/          # 总览 / AIS / ACLED / 时空叠加 / 新闻检索 / 全球背景参考
+├── app/GeoAgent.py     # 入口：Logo、顶部导航与页面路由
+├── app/workspace.py    # 工作台（对话 + 流式工具可视化 + 图层地图）
+├── app/sessions_ui.py  # 侧栏：新建分析、最近会话、本会话记忆
+├── app/chat_ui.py      # 消息、分析过程、空状态示例、中断标注
+├── app/map_view.py     # 图层拆分、累积、开关、视野、图例、下载
+├── app/palette.py      # 数据配色：分类色板与有序/发散/顺序色阶
+├── app/theme_watch.py  # 读取浏览器当前深浅主题，供地图图层取色
+├── app/styles/         # 设计令牌与工作台布局 CSS
+├── app/dashboards/     # 总览 / AIS / ACLED / 时空叠加 / 新闻检索 / 全球背景参考
 ├── agent/              # 智能体核心
 │   ├── react.py        # ReAct 主循环（流式事件）
 │   ├── tools.py        # 5 个 GIS/查数/RAG 工具（插件化注册）
