@@ -13,6 +13,7 @@ import json
 import math
 import time
 import uuid
+from pathlib import Path
 
 import requests
 from langchain_core.tools import tool
@@ -25,7 +26,7 @@ _UA = {"User-Agent": "geoagent-demo/0.1 (educational project)"}
 
 _MAX_TRACK_POINTS = 500  # 航迹抽稀上限，避免超大 GeoJSON
 
-# 内置地名库：本项目高频地名的人工坐标，优先于在线服务（覆盖本项目高频地名）
+# 内置地名库：Nominatim 不可达时的离线兜底（覆盖本项目高频地名）
 GAZETTEER = {
     "霍尔木兹海峡": (26.57, 56.25), "strait of hormuz": (26.57, 56.25),
     "曼德海峡": (12.58, 43.33), "bab el-mandeb": (12.58, 43.33),
@@ -40,14 +41,9 @@ GAZETTEER = {
 
 
 def _gazetteer_lookup(place: str) -> tuple[float, float] | None:
-    """内置地名库匹配：整串同名，或地名完整出现在查询里（如"曼德海峡周边"）。
-
-    只做单向包含。反向的 `p in name` 会让任意一个字都落到库里：查"海"会返回
-    霍尔木兹海峡，查"湾"会返回亚丁湾——比查不到更糟，因为它看起来是个结果。
-    """
-    p = " ".join(place.strip().lower().split())
+    p = place.strip().lower()
     for name, coord in GAZETTEER.items():
-        if name in p:
+        if name in p or p in name:
             return coord
     return None
 
@@ -75,11 +71,6 @@ def _circle_polygon(lat: float, lon: float, radius_km: float, n: int = 64) -> li
 def geocode(place: str) -> str:
     """地理编码：把地名（中英文均可，如"霍尔木兹海峡"/"Strait of Hormuz"）翻译成经纬度。
     涉及地名的空间分析必须先用本工具拿坐标，禁止凭印象猜坐标。"""
-    # 内置地名库优先：这批地名是本项目的高频入口，人工坐标比公共服务的同名候选可靠。
-    # 曾经只在断网时兜底，结果“曼德海峡”被在线服务解析成福州的“海峡传媒港”。
-    coord = _gazetteer_lookup(place)
-    if coord:
-        return f"已命中内置地名库：{place} -> lat={coord[0]}, lon={coord[1]}（人工维护坐标，可直接使用）"
     try:
         resp = requests.get(
             NOMINATIM_URL,
@@ -90,13 +81,17 @@ def geocode(place: str) -> str:
         resp.raise_for_status()
         hits = resp.json()
     except Exception as e:
+        coord = _gazetteer_lookup(place)
+        if coord:
+            return f"在线地理编码不可用（{type(e).__name__}），已命中内置地名库：{place} -> lat={coord[0]}, lon={coord[1]}"
         return f"地理编码服务不可用：{e}。可改用 query_database 工具结合已知坐标范围查询。"
     if not hits:
+        coord = _gazetteer_lookup(place)
+        if coord:
+            return f"在线服务无结果，已命中内置地名库：{place} -> lat={coord[0]}, lon={coord[1]}"
         return f"未找到地名：{place}。换个更通用的名称（如英文官方名）重试。"
-    # 不能替模型认定第一条就是目标地点：同名或近名的候选很常见，只能由模型按名称核对。
     lines = [f"{h['display_name']} -> lat={h['lat']}, lon={h['lon']}" for h in hits]
-    return ("候选结果（未核实，请按名称核对后再选用；不能直接假定第一条正确）：\n"
-            + "\n".join(lines))
+    return "候选结果（取第一个最准）：\n" + "\n".join(lines)
 
 
 @tool

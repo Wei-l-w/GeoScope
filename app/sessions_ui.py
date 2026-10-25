@@ -40,8 +40,15 @@ def start_new() -> None:
     clear_draft()
 
 
+def session_exists(sid: str | None) -> bool:
+    """另一个标签页可能刚把它删掉：打开、清空记忆、提问之前先问一句。
+    list_sessions 默认只取最近 50 个，limit=None（DuckDB 的 LIMIT NULL 即不限）才查得到最早的会话；
+    会话库还没建时它返回空列表，这里即为 False。"""
+    return bool(sid) and any(row[0] == sid for row in sessions_mod.list_sessions(limit=None))
+
+
 def open_session(sid: str) -> None:
-    if not sessions_mod.session_exists(sid):  # 另一个标签页刚删掉它：当作新会话，别让页面红屏
+    if not session_exists(sid):  # 另一个标签页刚删掉它：当作新会话，别让页面红屏
         start_new()
         return
     st.session_state.agent_messages = sessions_mod.load_messages(sid)
@@ -55,7 +62,7 @@ def delete_current(sid: str) -> None:
 
 
 def _clear_memory(sid: str) -> None:
-    if sessions_mod.session_exists(sid):
+    if session_exists(sid):
         sessions_mod.clear_memory(sid)
 
 
@@ -86,7 +93,7 @@ def render_memory(sid: str | None, busy: bool) -> None:
     try:
         memory = conversation.get_memory(sid) if sid else {}
     except ValueError as exc:
-        if sid and not sessions_mod.session_exists(sid):
+        if sid and not session_exists(sid):
             # 另一个标签页刚删掉当前会话：退回空的新会话，别让整页红屏。草稿留在输入框里。
             st.session_state.agent_messages = []
             st.session_state.current_session_id = None

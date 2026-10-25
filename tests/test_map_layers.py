@@ -182,6 +182,23 @@ def test_view_follows_the_shortest_arc_across_the_antimeridian(geojson):
     assert map_view.build([(1, [path])]).view == (-17.0, -179.75, 8.0)
 
 
+@pytest.mark.parametrize("geometry", [
+    {"type": "Point", "coordinates": [43.3, 12.6]},
+    {"type": "MultiPoint", "coordinates": [[42.0, 12.0], [44.5, 13.0]]},
+    {"type": "LineString", "coordinates": [[38.0, 20.0], [40.0, 18.0]]},
+    {"type": "MultiLineString", "coordinates": [[[38.0, 20.0], [39.0, 19.0]], [[41.0, 17.0], [42.5, 16.0]]]},
+    {"type": "Polygon", "coordinates": _square(43.3, 12.6, 1.0)},
+    {"type": "MultiPolygon", "coordinates": [_square(40.0, 10.0, 0.5), _square(45.0, 14.0, 0.5)]},
+    {"type": "GeometryCollection", "geometries": [{"type": "Point", "coordinates": [30.0, 5.0]},
+                                                  {"type": "LineString", "coordinates": [[31.0, 6.0], [33.0, 7.0]]}]},
+])
+def test_longitude_extent_matches_coordinate_bounds_away_from_the_antimeridian(geometry):
+    # 前端自己遍历几何取经度：不跨日界线时必须与 agent/artifacts.py 的最小/最大经度一致
+    features = [{"type": "Feature", "properties": {}, "geometry": geometry}]
+    left, _, right, _ = artifacts.coordinate_bounds({"type": "FeatureCollection", "features": features})
+    assert map_view.longitude_extent(features) == (left, right)
+
+
 def test_worldwide_points_still_fit_the_whole_map(geojson):
     path = geojson("world", [_feature("Point", [-170.0, 0.0]), _feature("Point", [0.0, 0.0]),
                              _feature("Point", [170.0, 0.0])])
@@ -202,6 +219,18 @@ def test_reset_nudges_every_view_field(geojson):
     assert (base.pitch, base.bearing) == (0, 0)
     for name in ("latitude", "longitude", "zoom", "pitch", "bearing"):
         assert getattr(moved, name) == pytest.approx(getattr(base, name) + 2e-7, abs=1e-12)
+
+
+@pytest.mark.parametrize("properties", [[1], "x", {"event_type": ["Battles"]}, {"radius_km": 10 ** 400}])
+def test_invalid_properties_are_reported_as_a_map_failure(geojson, properties):
+    # 属性必须是对象且只含简单值：agent/artifacts.py 不查这一项，map_view.load 读取时补上
+    path = geojson("bad_properties", [{"type": "Feature", "properties": properties,
+                                       "geometry": {"type": "Point", "coordinates": [43.3, 12.6]}}])
+    with pytest.raises(artifacts.ArtifactError, match="属性"):
+        map_view.load(path)
+    state = map_view.build([(1, [path])])
+    assert not state.layers and not state.files
+    assert any("属性" in error for error in state.errors)
 
 
 def test_download_list_skips_files_that_have_since_been_deleted(geojson, tmp_path):

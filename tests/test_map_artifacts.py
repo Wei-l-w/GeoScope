@@ -90,12 +90,6 @@ def test_nonfinite_json_even_in_properties_is_rejected(artifact_dir, literal):
         artifacts.load_geojson(str(path))
 
 
-@pytest.mark.parametrize("properties", [[1], "x", {"event_type": ["Battles"]}, {"radius_km": 10 ** 400}])
-def test_properties_must_be_an_object_of_simple_values(artifact_dir, properties):
-    with pytest.raises(artifacts.ArtifactError, match="属性"):
-        artifacts.load_geojson(save(artifact_dir, collection({"type": "Point", "coordinates": [1, 2]}, properties)))
-
-
 @pytest.mark.parametrize("position", [[float("nan"), 0], [0, float("inf")], [1, 2, float("-inf")]])
 def test_bounds_also_reject_nonfinite_coordinates(position):
     with pytest.raises(artifacts.ArtifactError, match="有限数值"):

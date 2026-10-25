@@ -1,6 +1,6 @@
 """工作台地图：把会话各轮的真实产物拆成可开关的图层，按主题配色上图（设计文档第 7 节）。
 
-只读取通过 agent/artifacts.py 校验的本地 GeoJSON；回答正文里的路径永远不会变成图层。
+只读取通过 agent/artifacts.py 校验（属性在本模块另查）的本地 GeoJSON；回答正文里的路径永远不会变成图层。
 """
 
 from __future__ import annotations
@@ -64,9 +64,32 @@ def turns(messages: list[dict]) -> list[tuple[int, list[str]]]:
     return result
 
 
+def check_properties(data: dict) -> None:
+    """属性必须是对象且只含简单值：图层名、提示框和结果标签直接展示这些值，不做嵌套解析。
+    agent/artifacts.py 只校验结构与坐标，这一项在前端读取时补上。"""
+    for feature in data["features"]:
+        properties = feature.get("properties")
+        if properties is not None and not isinstance(properties, dict):
+            raise artifacts.ArtifactError("GeoJSON 的属性必须是对象。")
+        for value in (properties or {}).values():
+            if isinstance(value, (dict, list)):
+                raise artifacts.ArtifactError("GeoJSON 的属性值必须是简单值。")
+            if isinstance(value, int) and not isinstance(value, bool):
+                try:
+                    float(value)
+                except OverflowError:
+                    raise artifacts.ArtifactError("GeoJSON 的属性数值超出范围。") from None
+
+
+def _read(path) -> dict:
+    data = artifacts.load_geojson(path)
+    check_properties(data)
+    return data
+
+
 @st.cache_data(max_entries=256, show_spinner=False)
 def _load_cached(path: str, mtime_ns: int, size: int) -> dict:
-    return artifacts.load_geojson(path)
+    return _read(path)
 
 
 def load(path: str) -> dict:
@@ -74,7 +97,7 @@ def load(path: str) -> dict:
     try:
         stat = Path(path).stat()
     except (OSError, TypeError, ValueError):
-        return artifacts.load_geojson(path)  # 交给校验函数给出统一的错误说明
+        return _read(path)  # 交给校验函数给出统一的错误说明
     return _load_cached(str(path), stat.st_mtime_ns, stat.st_size)
 
 
@@ -156,6 +179,38 @@ def build(turn_paths: list[tuple[int, list[str]]], reset: int = 0) -> MapState:
 
 
 # ---------------------------------------------------------------- 视野
+_DEPTH = {"Point": 0, "MultiPoint": 1, "LineString": 1, "Polygon": 2, "MultiLineString": 2, "MultiPolygon": 3}
+
+
+def _longitudes(geometry: dict):
+    """几何里的全部经度。产物已经过 load() 校验，这里只遍历、不再校验。"""
+    if geometry["type"] == "GeometryCollection":
+        for child in geometry["geometries"]:
+            yield from _longitudes(child)
+        return
+    positions = [geometry["coordinates"]]
+    for _ in range(_DEPTH[geometry["type"]]):
+        positions = [item for nested in positions for item in nested]
+    for position in positions:
+        yield float(position[0])
+
+
+def longitude_extent(features: list[dict]) -> tuple[float, float]:
+    """经度的覆盖区间：最大空隙超过半圈时（一对 ±179° 的点就是这样，coordinate_bounds
+    的最小/最大会把它算成覆盖整圈），改取空隙另一侧的短弧，右端可超过 180。
+    最大空隙不超过半圈时数据本身就散在半个地球以上，此时普通的最小/最大更符合直觉，
+    缩放也已经是 2 级，两者没有实际差别。"""
+    values = sorted({lon for feature in features for lon in _longitudes(feature["geometry"])})
+    if not values:
+        raise artifacts.ArtifactError("地图结果为空，没有可显示的几何图层。")
+    gaps = [((values[(index + 1) % len(values)] - values[index]) % 360, index) for index in range(len(values))]
+    gap, seam = max(gaps)
+    if gap <= 180:  # 数据散在半个地球以上：用普通的最小/最大，中心取数据的普通中点
+        return values[0], values[-1]
+    start = (seam + 1) % len(values)
+    return values[start], values[seam] + (360 if seam < start else 0)
+
+
 def fit_view(layers: list[MapLayer]) -> tuple[float, float, float]:
     """定位到最新一轮产出图层的范围；与图层是否隐藏无关，所以切换开关不会改变视野。
     经度取跨日界线的最短弧，再折回 -180–180，避免一对 ±179° 的点定位到全球。"""
@@ -164,7 +219,7 @@ def fit_view(layers: list[MapLayer]) -> tuple[float, float, float]:
     latest = max(layer.turn for layer in layers)
     features = [item for layer in layers if layer.turn == latest for item in layer.features]
     _, bottom, _, top = artifacts.coordinate_bounds({"type": "FeatureCollection", "features": features})
-    left, right = artifacts.longitude_extent(features)
+    left, right = longitude_extent(features)
     latitude, longitude, zoom = ui.fit_bounds(left, bottom, right, top, viewport=NOMINAL_VIEWPORT, padding=PADDING)
     if longitude > 180.0:
         longitude -= 360.0

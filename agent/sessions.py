@@ -157,19 +157,6 @@ def load_messages(session_id: str) -> list[dict]:
         return _load_messages(con, session_id)
 
 
-def _list_field(raw: str | None) -> list:
-    """消息行里的 JSON 附件（步骤、产物路径、工具记录）。
-
-    单行损坏只丢这一行的附件：会话必须还能打开，此后的提问也必须还能执行。
-    让一行坏 JSON 把 load_messages 整体抛掉，用户就再也点不开这个会话、也没法删它。
-    """
-    try:
-        value = json.loads(raw or "[]")
-    except (TypeError, ValueError):
-        return []
-    return value if isinstance(value, list) else []
-
-
 def _load_messages(con: duckdb.DuckDBPyConnection, session_id: str, cutoff: int = 0) -> list[dict]:
     rows = con.execute(
         "SELECT seq, role, content, steps_json, geojson_json, tool_records_json, error, reply_to_seq "
@@ -181,9 +168,9 @@ def _load_messages(con: duckdb.DuckDBPyConnection, session_id: str, cutoff: int 
             "seq": seq,
             "role": role,
             "content": content,
-            "steps": _list_field(steps),
-            "geojson": _list_field(geo),
-            "tool_records": _list_field(records),
+            "steps": json.loads(steps or "[]"),
+            "geojson": json.loads(geo or "[]"),
+            "tool_records": json.loads(records or "[]"),
             "error": error,
             "reply_to_seq": reply_to_seq,
         }
@@ -192,21 +179,12 @@ def _load_messages(con: duckdb.DuckDBPyConnection, session_id: str, cutoff: int 
 
 
 def load_memory(session_id: str) -> dict | None:
-    """读取本会话记忆；新建、清空或不存在的会话返回 None。
-
-    快照损坏（旧版本数据、手工改库）也按"没有记忆"处理：记忆可以从聊天记录重建，
-    下一次 save_memory 会覆盖它；不能让一行坏 JSON 把该会话此后每一次提问都变成整页异常。
-    """
+    """读取本会话记忆；新建、清空或不存在的会话返回 None。"""
     with _connect() as con:
         row = con.execute(
             "SELECT memory_json FROM chat_memory WHERE session_id = ?", [session_id]
         ).fetchone()
-    if not row or row[0] is None:
-        return None
-    try:
-        return json.loads(row[0])
-    except (TypeError, ValueError):
-        return None
+    return json.loads(row[0]) if row and row[0] is not None else None
 
 
 def save_memory(session_id: str, payload: dict) -> None:
@@ -252,16 +230,6 @@ def memory_messages(session_id: str) -> list[dict]:
                 and message["reply_to_seq"] <= cutoff
             )
         ]
-
-
-def session_exists(session_id: str) -> bool:
-    """另一个标签页可能刚把它删掉：先问一句，避免点开或被恢复的会话在后端报"会话不存在"。"""
-    if not session_id or not DB_PATH.exists():
-        return False
-    with _connect() as con:
-        return bool(con.execute(
-            "SELECT 1 FROM chat_sessions WHERE session_id = ?", [session_id]
-        ).fetchone())
 
 
 def delete_session(session_id: str) -> None:

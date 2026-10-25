@@ -118,56 +118,39 @@ def _corrupt_memory(store, sid):
                     [sid, "{not json"])
 
 
-def test_corrupted_memory_does_not_hide_the_chat_or_block_new_questions(store, monkeypatch):
-    # 记忆行损坏（旧版本数据、手工改库）不是"会话被删"：聊天记录要留着，
-    # 而且这个会话此后每一次提问都得能正常完成——坏快照按空记忆重建，下一次保存覆盖它。
+def test_corrupted_memory_is_reported_without_hiding_the_chat(store):
+    # 记忆行损坏（旧版本数据、手工改库）不是"会话被删"：聊天记录要留着，并明说记忆读不了。
+    # 损坏之后继续提问的容错在 agent/ 里，随 fix/agent-backend 单独提交。
     sid = _chat(store, "记忆损坏")
     app = _open(_app(), sid)
     _corrupt_memory(store, sid)
 
-    def fake_stream(prompt, history=None, session_id=None):
-        yield {"type": "thinking", "step": 1}
-        yield {"type": "answer", "result": react.AgentResult(question=prompt, answer="这是本轮的回答。")}
-
-    monkeypatch.setattr(react, "stream", fake_stream)
-    app.chat_input(key="geoagent_prompt").set_value("损坏之后还能提问吗？").run()
-
+    app.run()
     assert not app.exception
-    assert app.session_state["current_session_id"] == sid
-    stored = store.load_messages(sid)
-    assert stored[-1]["content"] == "这是本轮的回答。"
-    assert store.load_memory(sid) is not None  # 坏快照已被重建的记忆覆盖
+    assert app.session_state["current_session_id"] == sid  # 不能当成"会话被删"静默清空
+    assert len(app.chat_message) == 2
+    assert any("记忆无法读取" in str(item.value) for item in app.error)
 
 
-def _corrupt_message_json(store, sid):
+def test_session_exists_sees_sessions_beyond_the_sidebar_limit(store):
+    # 侧栏的 list_sessions() 默认只取最近 50 个；判断会话在不在必须查全量，最早的会话也要认得出
     import duckdb
 
-    with duckdb.connect(str(store.DB_PATH)) as con:
-        con.execute("UPDATE chat_messages SET steps_json = ?, geojson_json = ?, tool_records_json = ? "
-                    "WHERE session_id = ? AND role = 'assistant'",
-                    ["{not json", "[{", "null", sid])
+    from app import sessions_ui
 
-
-def test_a_corrupted_message_row_does_not_lock_the_session(store, monkeypatch):
-    # 消息行的 JSON 附件损坏（旧版本数据、写入中断）：单行只丢附件，会话必须还能点开、
-    # 还能继续提问。让 load_messages 整体抛异常，用户就再也打不开这个会话，也没法删它。
-    sid = _chat(store, "消息损坏")
-    _corrupt_message_json(store, sid)
-
-    app = _open(_app(), sid)  # 路径 A：从侧栏点开
-    assert app.session_state["current_session_id"] == sid
-    assert len(app.chat_message) == 2
-
-    def fake_stream(prompt, history=None, session_id=None):
-        yield {"type": "thinking", "step": 1}
-        yield {"type": "answer", "result": react.AgentResult(question=prompt, answer="损坏之后仍能回答。")}
-
-    monkeypatch.setattr(react, "stream", fake_stream)
-    app.chat_input(key="geoagent_prompt").set_value("损坏之后还能提问吗？").run()  # 路径 B：继续提问
-
-    assert not app.exception
-    assert store.load_messages(sid)[-1]["content"] == "损坏之后仍能回答。"
-    assert "损坏之后仍能回答。" in "\n".join(str(item.value) for item in app.chat_message[-1].markdown)
+    assert sessions_ui.session_exists("anything") is False  # 会话库还没建
+    oldest = _chat(store, "最早的会话")
+    for index in range(50):
+        _chat(store, f"会话 {index}")
+    with duckdb.connect(str(store.DB_PATH)) as con:  # 时间戳可能并列：明确推到最早
+        con.execute("UPDATE chat_messages SET created_at = created_at - INTERVAL 1 YEAR WHERE session_id = ?",
+                    [oldest])
+    assert oldest not in {row[0] for row in store.list_sessions()}
+    assert sessions_ui.session_exists(oldest) is True
+    assert sessions_ui.session_exists("") is False
+    assert sessions_ui.session_exists(None) is False
+    store.delete_session(oldest)
+    assert sessions_ui.session_exists(oldest) is False
 
 
 def _ghost_page(sid):

@@ -139,7 +139,7 @@ def run_analysis(question: str, sid: str) -> dict:
 
 
 if busy:
-    if sid and not sessions_mod.session_exists(sid):
+    if sid and not sessions_ui.session_exists(sid):
         # 另一个标签页在本次提交前删掉了这个会话：换新会话继续，别整页报错，也别丢用户的问题
         messages = st.session_state.agent_messages = []
         st.session_state.current_session_id = sid = None
@@ -158,7 +158,7 @@ if busy:
                                       tool_records=reply["tool_records"], error=reply["error"],
                                       reply_to_seq=user_seq)
     except ValueError:
-        if sessions_mod.session_exists(sid):
+        if sessions_ui.session_exists(sid):
             raise  # 会话还在：是别的数据问题，不能当成"被删了"吞掉
         # 分析期间另一个标签页删掉了这个会话：回答已经生成并显示，但没有地方可存。
         # 停在当前这一帧，让用户还能读到回答；下一次交互会回到空的新会话。
