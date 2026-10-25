@@ -21,7 +21,7 @@ MAX_CONSECUTIVE_TOOL_CALLS = 2
 
 SYSTEM_PROMPT = """你是 GeoAgent，一个空间分析智能体。你可以调用以下工具完成任务：
 - geocode：地名 -> 经纬度（涉及地名时必须先调用，禁止凭印象猜坐标）
-- buffer_analysis：缓冲区分析（某点周边 X 公里内的事件，输出 GeoJSON）
+- buffer_analysis：缓冲区分析（某点周边 X 公里内的事件总数与按类型计数，输出 GeoJSON）
 - ship_track：船舶航迹（MMSI -> GeoJSON 航迹线）
 - query_database：通用统计/筛选查数（自然语言转 SQL）
 - knowledge_search：知识库检索事件背景与相关报道（语料为英文，查询请改写为英文关键词）

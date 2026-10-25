@@ -13,7 +13,7 @@ import json
 import math
 import time
 import uuid
-from pathlib import Path
+from collections import Counter
 
 import requests
 from langchain_core.tools import tool
@@ -25,8 +25,9 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 _UA = {"User-Agent": "geoagent-demo/0.1 (educational project)"}
 
 _MAX_TRACK_POINTS = 500  # 航迹抽稀上限，避免超大 GeoJSON
+_MAX_BUFFER_TYPES = 8  # 缓冲区按类型计数最多列出几类，其余合并（GDELT 的事件类型很多）
 
-# 内置地名库：Nominatim 不可达时的离线兜底（覆盖本项目高频地名）
+# 内置地名库：本项目高频地名的人工坐标，优先于在线服务（覆盖本项目高频地名）
 GAZETTEER = {
     "霍尔木兹海峡": (26.57, 56.25), "strait of hormuz": (26.57, 56.25),
     "曼德海峡": (12.58, 43.33), "bab el-mandeb": (12.58, 43.33),
@@ -41,9 +42,14 @@ GAZETTEER = {
 
 
 def _gazetteer_lookup(place: str) -> tuple[float, float] | None:
-    p = place.strip().lower()
+    """内置地名库匹配：整串同名，或地名完整出现在查询里（如"曼德海峡周边"）。
+
+    只做单向包含。反向的 `p in name` 会让任意一个字都落到库里：查"海"会返回
+    霍尔木兹海峡，查"湾"会返回亚丁湾——比查不到更糟，因为它看起来是个结果。
+    """
+    p = " ".join(place.strip().lower().split())
     for name, coord in GAZETTEER.items():
-        if name in p or p in name:
+        if name in p:
             return coord
     return None
 
@@ -67,10 +73,29 @@ def _circle_polygon(lat: float, lon: float, radius_km: float, n: int = 64) -> li
     return [coords]
 
 
+def _type_breakdown(rows: list) -> str:
+    """圈内事件按类型计数，模型据此直接回答"按类型统计"，不必再写一次 SQL。
+    GDELT 的 event_code 列入库时已优先换成事件名称（ingest/mappings.py），两张表都按"类型"称呼。
+    同数按名称排：仓库不保证返回顺序，排名不能随它变。"""
+    if not rows:
+        return ""
+    ranked = sorted(Counter(r[1] or "未知" for r in rows).items(), key=lambda item: (-item[1], str(item[0])))
+    parts = [f"{name} {count}" for name, count in ranked[:_MAX_BUFFER_TYPES]]
+    rest = ranked[_MAX_BUFFER_TYPES:]
+    if rest:
+        parts.append(f"其余 {len(rest)} 类共 {sum(count for _, count in rest)} 条")
+    return f"按类型：{'、'.join(parts)}。"
+
+
 @tool
 def geocode(place: str) -> str:
     """地理编码：把地名（中英文均可，如"霍尔木兹海峡"/"Strait of Hormuz"）翻译成经纬度。
     涉及地名的空间分析必须先用本工具拿坐标，禁止凭印象猜坐标。"""
+    # 内置地名库优先：这批地名是本项目的高频入口，人工坐标比公共服务的同名候选可靠。
+    # 曾经只在断网时兜底，结果“曼德海峡”被在线服务解析成福州的“海峡传媒港”。
+    coord = _gazetteer_lookup(place)
+    if coord:
+        return f"已命中内置地名库：{place} -> lat={coord[0]}, lon={coord[1]}（人工维护坐标，可直接使用）"
     try:
         resp = requests.get(
             NOMINATIM_URL,
@@ -81,22 +106,18 @@ def geocode(place: str) -> str:
         resp.raise_for_status()
         hits = resp.json()
     except Exception as e:
-        coord = _gazetteer_lookup(place)
-        if coord:
-            return f"在线地理编码不可用（{type(e).__name__}），已命中内置地名库：{place} -> lat={coord[0]}, lon={coord[1]}"
         return f"地理编码服务不可用：{e}。可改用 query_database 工具结合已知坐标范围查询。"
     if not hits:
-        coord = _gazetteer_lookup(place)
-        if coord:
-            return f"在线服务无结果，已命中内置地名库：{place} -> lat={coord[0]}, lon={coord[1]}"
         return f"未找到地名：{place}。换个更通用的名称（如英文官方名）重试。"
+    # 不能替模型认定第一条就是目标地点：同名或近名的候选很常见，只能由模型按名称核对。
     lines = [f"{h['display_name']} -> lat={h['lat']}, lon={h['lon']}" for h in hits]
-    return "候选结果（取第一个最准）：\n" + "\n".join(lines)
+    return ("候选结果（未核实，请按名称核对后再选用；不能直接假定第一条正确）：\n"
+            + "\n".join(lines))
 
 
 @tool
 def buffer_analysis(lat: float, lon: float, radius_km: float, table: str = "acled_events") -> str:
-    """缓冲区分析：以 (lat, lon) 为圆心、radius_km 为半径画圈，统计圈内事件并输出 GeoJSON。
+    """缓冲区分析：以 (lat, lon) 为圆心、radius_km 为半径画圈，统计圈内事件（总数与按类型计数）并输出 GeoJSON。
     table 可选 acled_events / gdelt_events。适合"某海峡/港口周边 X 公里内发生了什么"。"""
     if table not in ("acled_events", "gdelt_events"):
         return f"不支持的表 {table}，仅支持 acled_events / gdelt_events。"
@@ -143,9 +164,10 @@ def buffer_analysis(lat: float, lon: float, radius_km: float, table: str = "acle
         ],
     }
     path = _save_geojson("buffer", geojson)
+    # 计数不能接在路径同一行的后面：artifacts.extract_tool_path 把最后一个"GeoJSON 已保存："之后的整行当作路径。
     return (
         f"缓冲区（{lat}, {lon}）半径 {radius_km}km：圈内共 {len(inside)} 条记录"
-        f"（{table}）。GeoJSON 已保存：{path}"
+        f"（{table}）。{_type_breakdown(inside)}GeoJSON 已保存：{path}"
     )
 
 

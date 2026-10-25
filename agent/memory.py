@@ -20,6 +20,10 @@ _KNOWN_PLACES = (
 _DATE = r"\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?"
 _NUMBER = r"[-+]?\d+(?:\.\d+)?"
 _PLACE_ALIASES = dict(zip(_KNOWN_PLACES[14:], _KNOWN_PLACES[:9]))
+# 版本 1 的快照由旧的 geocode 规则写入：候选列表的第一条被当成了结论，
+# 于是"曼德海峡"记成福州（26.14, 119.13）。这类坐标在快照里无法自证对错，
+# 只能按新规则从原始聊天记录整体重建——快照本来就是可丢弃的派生数据。
+_MEMORY_VERSION = 2
 
 
 def _number(value, *, positive=False, integer=False):
@@ -293,12 +297,14 @@ def _tool_state(state, record, seq):
     _apply_fields(state, safe_args, seq, origin, json.dumps(args, ensure_ascii=False))
     output = str(record.get("output", ""))
     if name == "geocode":
-        match = re.search(rf"lat=({_NUMBER}),\s*lon=({_NUMBER})", output)
-        if match:
-            coords = _coordinates(match.group(1), match.group(2))
+        # 候选列表不是结论：多个 lat/lon 说明工具只给了待核对的选项，
+        # 取第一条会记住一个可能几千公里外的坐标。唯一的坐标才算已解析。
+        matches = re.findall(rf"lat=({_NUMBER}),\s*lon=({_NUMBER})", output)
+        if len(matches) == 1:
+            coords = _coordinates(*matches[0])
             if (coords and "coordinates" not in state.get("cleared_fields", {})
                     and state.get("sources", {}).get("coordinates", {}).get("origin") != "user"):
-                _put(state, "coordinates", coords, seq, origin, match.group(0))
+                _put(state, "coordinates", coords, seq, origin, "lat=%s, lon=%s" % matches[0])
     path = record.get("geojson_path")
     if not path:
         match = re.search(r"GeoJSON 已保存：([^\r\n]+)", output)
@@ -345,7 +351,8 @@ def build_memory(messages: list[dict], previous: dict | None = None,
     recent_turns 是保留原文的已完成问答数。只有退出近期窗口的完整问答进入
     摘录；失败回答标记为失败，未完成问题不捏造回答。seq 必须在会话内稳定。
     """
-    previous = previous if isinstance(previous, dict) and previous.get("version") == 1 else {}
+    previous = (previous if isinstance(previous, dict)
+                and previous.get("version") == _MEMORY_VERSION else {})
     state = copy.deepcopy(previous.get("state", {}))
     if not isinstance(state, dict):
         state = {}
@@ -401,7 +408,7 @@ def build_memory(messages: list[dict], previous: dict | None = None,
     if reset_at > int(previous.get("processed_through_seq", 0) or 0):
         summary = ""
     payload = {
-        "version": 1,
+        "version": _MEMORY_VERSION,
         "summary": _bounded_summary(summary, excerpts, max(0, int(summary_chars))),
         "state": state,
         "summarized_through_seq": summarized,

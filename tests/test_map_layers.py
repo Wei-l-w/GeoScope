@@ -223,7 +223,7 @@ def test_reset_nudges_every_view_field(geojson):
 
 @pytest.mark.parametrize("properties", [[1], "x", {"event_type": ["Battles"]}, {"radius_km": 10 ** 400}])
 def test_invalid_properties_are_reported_as_a_map_failure(geojson, properties):
-    # 属性必须是对象且只含简单值：agent/artifacts.py 不查这一项，map_view.load 读取时补上
+    # 属性必须是对象且只含简单值：agent/artifacts.load_geojson 判为损坏，经 map_view.load 传到界面的"地图加载失败"
     path = geojson("bad_properties", [{"type": "Feature", "properties": properties,
                                        "geometry": {"type": "Point", "coordinates": [43.3, 12.6]}}])
     with pytest.raises(artifacts.ArtifactError, match="属性"):
