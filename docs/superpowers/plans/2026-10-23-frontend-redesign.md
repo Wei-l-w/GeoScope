@@ -1971,15 +1971,15 @@ git add app/ui.py app/chat_ui.py app/pages tests/test_ui.py && \
 
 **Files:**
 - Modify: `app/map_view.py`（整体重写，末尾保留过渡代码）
-- Modify: `agent/artifacts.py`（新增 `longitude_extent`、`_check_properties`，见下方"质量复查修正"）
-- Test: `tests/test_map_layers.py`、`tests/test_map_artifacts.py`
+- 不改 `agent/artifacts.py`（规格 1.3 节非目标）：跨日界线经度范围 `longitude_extent` 与属性校验 `check_properties` 都写在 `app/map_view.py`，见下方"质量复查修正"
+- Test: `tests/test_map_layers.py`
 
 **质量复查修正**（代码已按此实现，下方代码块未逐字回改，以本节为准）：
 
 - 航迹只认 `LineString`，或同时带 `points_total` 与 `points_shown` 的 `Point`。`query_database` 把 SQL 列名原样写成属性，只看 `mmsi` 会把 AIS 点集当成航迹（每行一个 deck 图层）——实测 2000 行时图层数 2000、载荷 1.14 MB。多边形带 `mmsi` 时还会走进航迹分支并 `IndexError`。
 - 同一轮里同名的图层在"· 第 N 轮"之后再加序号：一次回答做两个缓冲区时，两个按钮原本同名。
-- 经度取跨日界线的最短弧（`artifacts.longitude_extent`），`fit_view` 再把中心折回 −180–180。原来一对 ±179° 的点会定位到全球、缩放 2 级。
-- `load_geojson` 增加属性校验：`properties` 必须是对象、值必须是简单值、整数不能溢出 `float`。原来非对象的 `properties` 会让整个页面 `AttributeError`。
+- 经度取跨日界线的最短弧（`map_view.longitude_extent`，前端自己遍历几何取经度），`fit_view` 再把中心折回 −180–180。原来一对 ±179° 的点会定位到全球、缩放 2 级。
+- `map_view.load` 读取时增加属性校验（`check_properties`）：`properties` 必须是对象、值必须是简单值、整数不能溢出 `float`。原来非对象的 `properties` 会让整个页面 `AttributeError`。
 - 下载按钮的 `data` 改成闭包按需读取，文件已被删除时给一行"文件已不可用"，不留点了才报错的按钮。
 
 - [ ] **Step 1: 写测试**
@@ -4469,10 +4469,10 @@ git add scripts/capture_screens.py docs/ui-light-1440x900.png docs/ui-dark-1440x
 - 隐藏图层后视野不动、统计出现"（1 个已隐藏）"，"复位"回到最新结果范围；下载 popover 按文件列出两项；
 - 深浅主题切换时控件、图表、底图、图层配色一起变；刷新后打开会话，消息与图层恢复、隐藏状态回到全部显示。
 
-**发现并已修复的问题**
+**发现的问题**（修复已移到 `fix/agent-backend` 分支，待单独提 PR：按规格 1.3 节，前端分支不改 `agent/`）
 
-1. **地名坐标记成了候选列表第一条**（`agent/tools.py`、`agent/memory.py`）。`geocode` 在线候选页一次返回多个 `lat=…, lon=…`，记忆提取把第一条当成结论，"曼德海峡"于是记成了福州（26.14, 119.13），后续轮次继续沿用。修复：记忆只在**恰好一个**坐标时才采信；`geocode` 改为内置地名优先、在线结果明确标注"候选结果（未核实）"。补 8 条 `tests/test_tools_geocode.py` 与多条记忆回归测试（`4631c16`）。
-2. **旧快照会自我延续**（`agent/memory.py`）。修好提取规则后，已存库的 v1 快照仍被信任，刷新也不会变。修复：引入 `_MEMORY_VERSION = 2`，版本不符时丢弃快照、从原始聊天记录整体重建——记忆是可丢弃的派生数据。已用变异测试确认（把门槛放宽回接受 v1，新测试立刻变红）。
+1. **地名坐标记成了候选列表第一条**（`agent/tools.py`、`agent/memory.py`）。`geocode` 在线候选页一次返回多个 `lat=…, lon=…`，记忆提取把第一条当成结论，"曼德海峡"于是记成了福州（26.14, 119.13），后续轮次继续沿用。修复（在 `fix/agent-backend`）：记忆只在**恰好一个**坐标时才采信；`geocode` 改为内置地名优先、在线结果明确标注"候选结果（未核实）"。补 8 条 `tests/test_tools_geocode.py` 与多条记忆回归测试（原提交 `4631c16`，本分支已撤回）。
+2. **旧快照会自我延续**（`agent/memory.py`）。修好提取规则后，已存库的 v1 快照仍被信任，刷新也不会变。修复（在 `fix/agent-backend`）：引入 `_MEMORY_VERSION = 2`，版本不符时丢弃快照、从原始聊天记录整体重建——记忆是可丢弃的派生数据。已用变异测试确认（把门槛放宽回接受 v1，新测试立刻变红）。
 
 **保留未改的一处**：第二轮模型回答里的数字（21 / 17 / 3 / 2，共 43）与它自己可见 SQL 用的中心点（12.6, 43.3，按工具的平面距离公式应为 141 条）不一致。核对数据后确认：43 是用 buffer 工具返回的坐标（12.5743764, 43.3128158）算出来的，回答正文也写明了以该坐标为中心；这是模型的表述习惯，不是工具或记忆的缺陷，因此不改生产代码，只在验收记录里留痕。
 

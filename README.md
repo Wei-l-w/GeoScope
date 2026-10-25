@@ -37,7 +37,7 @@
 │  Critic ：SQL 报错自纠正 + 同工具调用熔断     │
 └─────────────────────────────────────────────┘
    │ Function Calling（5 个插件化工具）
-   ├─ geocode          地名 → 经纬度（常用地名用内置坐标，其余查 Nominatim）
+   ├─ geocode          地名 → 经纬度（Nominatim + 内置地名库兜底）
    ├─ buffer_analysis  缓冲区分析（SQL 下推）→ GeoJSON
    ├─ ship_track       船舶航迹（自动抽稀 ≤500 点）→ GeoJSON
    ├─ query_database   Text-to-GeoSQL（schema linking + 错题本 few-shot + 自纠正）
