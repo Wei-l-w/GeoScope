@@ -109,22 +109,18 @@ def test_session_deleted_in_another_tab_falls_back_to_a_new_one(store):
     assert "还没有历史会话" in _captions(app)
 
 
-def _corrupt_memory(store, sid):
-    import duckdb
+def test_corrupted_memory_is_reported_without_hiding_the_chat(store, monkeypatch):
+    # 记忆读不出来（旧版本数据、手工改库）不是"会话被删"：聊天记录要留着，并明说记忆读不了。
+    # 直接让 get_memory 抛错，只测前端这一分支；坏记忆本身的容错在 agent/，见 fix/agent-backend。
+    from agent import conversation
 
-    with duckdb.connect(str(store.DB_PATH)) as con:
-        con.execute("INSERT INTO chat_memory (session_id, memory_json, cutoff_seq) VALUES (?, ?, 0) "
-                    "ON CONFLICT (session_id) DO UPDATE SET memory_json = excluded.memory_json",
-                    [sid, "{not json"])
-
-
-def test_corrupted_memory_is_reported_without_hiding_the_chat(store):
-    # 记忆行损坏（旧版本数据、手工改库）不是"会话被删"：聊天记录要留着，并明说记忆读不了。
-    # 损坏之后继续提问的容错在 agent/ 里，随 fix/agent-backend 单独提交。
     sid = _chat(store, "记忆损坏")
     app = _open(_app(), sid)
-    _corrupt_memory(store, sid)
 
+    def unreadable(session_id):
+        raise ValueError("记忆 JSON 无法解析")
+
+    monkeypatch.setattr(conversation, "get_memory", unreadable)
     app.run()
     assert not app.exception
     assert app.session_state["current_session_id"] == sid  # 不能当成"会话被删"静默清空
@@ -141,7 +137,7 @@ def test_session_exists_sees_sessions_beyond_the_sidebar_limit(store):
     assert sessions_ui.session_exists("anything") is False  # 会话库还没建
     oldest = _chat(store, "最早的会话")
     for index in range(50):
-        _chat(store, f"会话 {index}")
+        store.save_message(store.create_session(f"会话 {index}"), "user", "问题")
     with duckdb.connect(str(store.DB_PATH)) as con:  # 时间戳可能并列：明确推到最早
         con.execute("UPDATE chat_messages SET created_at = created_at - INTERVAL 1 YEAR WHERE session_id = ?",
                     [oldest])
@@ -149,6 +145,7 @@ def test_session_exists_sees_sessions_beyond_the_sidebar_limit(store):
     assert sessions_ui.session_exists(oldest) is True
     assert sessions_ui.session_exists("") is False
     assert sessions_ui.session_exists(None) is False
+    assert sessions_ui.session_exists(store.create_session("还没有消息")) is True
     store.delete_session(oldest)
     assert sessions_ui.session_exists(oldest) is False
 

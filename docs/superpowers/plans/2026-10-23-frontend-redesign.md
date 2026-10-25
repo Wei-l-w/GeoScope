@@ -1971,7 +1971,7 @@ git add app/ui.py app/chat_ui.py app/pages tests/test_ui.py && \
 
 **Files:**
 - Modify: `app/map_view.py`（整体重写，末尾保留过渡代码）
-- 不改 `agent/artifacts.py`（规格 1.3 节非目标）：跨日界线经度范围 `longitude_extent` 与属性校验 `check_properties` 都写在 `app/map_view.py`，见下方"质量复查修正"
+- 不改 `agent/artifacts.py`（规格 1.3 节非目标）：跨日界线经度范围 `longitude_extent` 与属性校验 `_check_properties` 都写在 `app/map_view.py`，见下方"质量复查修正"
 - Test: `tests/test_map_layers.py`
 
 **质量复查修正**（代码已按此实现，下方代码块未逐字回改，以本节为准）：
@@ -1979,7 +1979,7 @@ git add app/ui.py app/chat_ui.py app/pages tests/test_ui.py && \
 - 航迹只认 `LineString`，或同时带 `points_total` 与 `points_shown` 的 `Point`。`query_database` 把 SQL 列名原样写成属性，只看 `mmsi` 会把 AIS 点集当成航迹（每行一个 deck 图层）——实测 2000 行时图层数 2000、载荷 1.14 MB。多边形带 `mmsi` 时还会走进航迹分支并 `IndexError`。
 - 同一轮里同名的图层在"· 第 N 轮"之后再加序号：一次回答做两个缓冲区时，两个按钮原本同名。
 - 经度取跨日界线的最短弧（`map_view.longitude_extent`，前端自己遍历几何取经度），`fit_view` 再把中心折回 −180–180。原来一对 ±179° 的点会定位到全球、缩放 2 级。
-- `map_view.load` 读取时增加属性校验（`check_properties`）：`properties` 必须是对象、值必须是简单值、整数不能溢出 `float`。原来非对象的 `properties` 会让整个页面 `AttributeError`。
+- `map_view.load` 读取时增加属性校验（`_check_properties`）：`properties` 必须是对象、值必须是简单值、整数不能溢出 `float`。原来非对象的 `properties` 会让整个页面 `AttributeError`。
 - 下载按钮的 `data` 改成闭包按需读取，文件已被删除时给一行"文件已不可用"，不留点了才报错的按钮。
 
 - [ ] **Step 1: 写测试**
@@ -2370,7 +2370,7 @@ def fit_view(layers: list[MapLayer]) -> tuple[float, float, float]:
     latest = max(layer.turn for layer in layers)
     features = [item for layer in layers if layer.turn == latest for item in layer.features]
     _, bottom, _, top = artifacts.coordinate_bounds({"type": "FeatureCollection", "features": features})
-    left, right = artifacts.longitude_extent(features)
+    left, right = longitude_extent(features)
     latitude, longitude, zoom = ui.fit_bounds(left, bottom, right, top, viewport=NOMINAL_VIEWPORT, padding=PADDING)
     if longitude > 180.0:
         longitude -= 360.0
@@ -2650,7 +2650,7 @@ python -m pytest tests/ -q
 - [ ] **Step 6: 提交**
 
 ```bash
-git add app/map_view.py agent/artifacts.py tests/test_map_layers.py tests/test_map_artifacts.py && \
+git add app/map_view.py tests/test_map_layers.py && \
   git commit -m "feat(map): 工作台地图图层模型" -m "按要素拆分图层并在会话内累积；视野按最新一轮结果在墨卡托投影下计算；复位同时微调视野五个字段；ACLED 事件 3 色 + 其他，非 ACLED 点用中性圆环；GeoJSON 按路径、修改时间、大小缓存。旧 prepare/render 暂留给旧工作台。" -m "Co-Authored-By: Claude Code <noreply@anthropic.com>"
 ```
 
@@ -4487,4 +4487,5 @@ git add scripts/capture_screens.py docs/ui-light-1440x900.png docs/ui-dark-1440x
 ### 收尾
 
 - 全量回归：`335 passed`；`python -m compileall`、`git diff --check`、ruff（`agent/`、`tests/`、`scripts/`）均通过；
+- 2026-10-25 按规格 1.3 节恢复 `agent/` 之后（`2b6567d` 起）：`330 passed`。只测后端行为的 18 条用例随修复移到 `fix/agent-backend`，另加 13 条前端用例；
 - 分支 `feat/frontend-redesign` 领先 `master` 34 个提交。用户选择**保留分支、暂不合并**，等自行查看界面后再定。

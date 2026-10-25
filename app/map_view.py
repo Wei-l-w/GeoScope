@@ -64,7 +64,7 @@ def turns(messages: list[dict]) -> list[tuple[int, list[str]]]:
     return result
 
 
-def check_properties(data: dict) -> None:
+def _check_properties(data: dict) -> None:
     """属性必须是对象且只含简单值：图层名、提示框和结果标签直接展示这些值，不做嵌套解析。
     agent/artifacts.py 只校验结构与坐标，这一项在前端读取时补上。"""
     for feature in data["features"]:
@@ -83,7 +83,7 @@ def check_properties(data: dict) -> None:
 
 def _read(path) -> dict:
     data = artifacts.load_geojson(path)
-    check_properties(data)
+    _check_properties(data)
     return data
 
 
@@ -199,7 +199,7 @@ def longitude_extent(features: list[dict]) -> tuple[float, float]:
     """经度的覆盖区间：最大空隙超过半圈时（一对 ±179° 的点就是这样，coordinate_bounds
     的最小/最大会把它算成覆盖整圈），改取空隙另一侧的短弧，右端可超过 180。
     最大空隙不超过半圈时数据本身就散在半个地球以上，此时普通的最小/最大更符合直觉，
-    缩放也已经是 2 级，两者没有实际差别。"""
+    缩放也已经是 2 级，两者没有实际差别。要素须已经过 load() 校验。"""
     values = sorted({lon for feature in features for lon in _longitudes(feature["geometry"])})
     if not values:
         raise artifacts.ArtifactError("地图结果为空，没有可显示的几何图层。")
