@@ -3,9 +3,10 @@
 from pathlib import Path
 
 import pytest
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from agent import react, sessions
+from agent import conversation, react, sessions
 
 
 PAGE = Path(__file__).resolve().parents[1] / "app" / "GeoAgent.py"
@@ -131,22 +132,39 @@ def test_submit_persists_reply_and_tool_evidence(chat_db, monkeypatch):
 
 def test_bold_heading_with_trailing_colon_renders_live_and_in_history(chat_db, monkeypatch):
     raw = "**船舶与说法：**银河领袖号是一艘汽车运输船。"
+    expected = "**船舶与说法**：银河领袖号是一艘汽车运输船。"
+    rendered, live_rendered = [], []
+    markdown = st.markdown
+    save_assistant = conversation.record_assistant
+
+    def capture_markdown(body, *args, **kwargs):
+        rendered.append(str(body))
+        return markdown(body, *args, **kwargs)
+
+    def capture_live_and_save(*args, **kwargs):
+        # 保存发生在实时回答渲染之后、历史重跑之前，不依赖 AppTest 是否保留旧子树。
+        live_rendered.extend(rendered)
+        return save_assistant(*args, **kwargs)
 
     def fake_stream(prompt, history=None, session_id=None):
         yield {"type": "answer", "result": react.AgentResult(question=prompt, answer=raw)}
 
+    monkeypatch.setattr(st, "markdown", capture_markdown)
+    monkeypatch.setattr(conversation, "record_assistant", capture_live_and_save)
     monkeypatch.setattr(react, "stream", fake_stream)
     app = _app()
     app.chat_input(key="geoagent_prompt").set_value("银河领袖号是什么船？").run()
     assert not app.exception
-    # AppTest 在同一次运行里留着流式显示时的元素：历史消息的回答占了原来状态行的位置，
-    # 流式显示的回答还在后面（中间隔着 st.empty），所以这里有两段，两段都要修正。
-    # 夹具里加了工具步骤、结果标签或错误提示，这个数目就会变。
-    shown = [str(element.value) for element in app.chat_message[1].markdown]
-    assert len(shown) == 2
-    assert all(text == "**船舶与说法**：银河领袖号是一艘汽车运输船。" for text in shown)
+    assert expected in live_rendered
+    assert raw not in live_rendered
+
     sid = app.session_state["current_session_id"]
     assert chat_db.load_messages(sid)[1]["content"] == raw  # 只改显示，存档仍是模型原文
+    # 重新打开已存会话，只检查历史回答，不混入同次提交留下的实时元素。
+    restored = _open(_app(), sid)
+    shown = [str(element.value) for element in restored.chat_message[1].markdown]
+    assert expected in shown
+    assert raw not in shown
 
 
 @pytest.mark.parametrize("failure", ["error_result", "exception", "no_answer"])
