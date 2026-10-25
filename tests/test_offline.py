@@ -5,6 +5,7 @@
 """
 
 import json
+import re
 
 import pytest
 
@@ -77,6 +78,14 @@ def test_buffer_analysis_on_sample():
         {"lat": 15.0, "lon": 41.5, "radius_km": 500, "table": "acled_events"}
     )
     assert "圈内共" in out and "GeoJSON 已保存" in out
+
+
+def test_buffer_breakdown_adds_up_to_the_total():
+    out = buffer_analysis.invoke({"lat": 12.58, "lon": 43.33, "radius_km": 150, "table": "acled_events"})
+    total = int(re.search(r"圈内共 (\d+) 条记录", out).group(1))
+    breakdown = re.search(r"按类型：(.+?)。GeoJSON 已保存：", out).group(1)
+    assert total > 0
+    assert sum(int(part.rsplit(" ", 1)[1]) for part in breakdown.split("、")) == total
 
 
 def test_ship_track_unknown_mmsi():
