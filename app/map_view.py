@@ -1,6 +1,6 @@
 """工作台地图：把会话各轮的真实产物拆成可开关的图层，按主题配色上图（设计文档第 7 节）。
 
-只读取通过 agent/artifacts.py 校验（属性在本模块另查）的本地 GeoJSON；回答正文里的路径永远不会变成图层。
+只读取通过 agent/artifacts.py 校验的本地 GeoJSON；回答正文里的路径永远不会变成图层。
 """
 
 from __future__ import annotations
@@ -64,32 +64,9 @@ def turns(messages: list[dict]) -> list[tuple[int, list[str]]]:
     return result
 
 
-def _check_properties(data: dict) -> None:
-    """属性必须是对象且只含简单值：图层名、提示框和结果标签直接展示这些值，不做嵌套解析。
-    agent/artifacts.py 只校验结构与坐标，这一项在前端读取时补上。"""
-    for feature in data["features"]:
-        properties = feature.get("properties")
-        if properties is not None and not isinstance(properties, dict):
-            raise artifacts.ArtifactError("GeoJSON 的属性必须是对象。")
-        for value in (properties or {}).values():
-            if isinstance(value, (dict, list)):
-                raise artifacts.ArtifactError("GeoJSON 的属性值必须是简单值。")
-            if isinstance(value, int) and not isinstance(value, bool):
-                try:
-                    float(value)
-                except OverflowError:
-                    raise artifacts.ArtifactError("GeoJSON 的属性数值超出范围。") from None
-
-
-def _read(path) -> dict:
-    data = artifacts.load_geojson(path)
-    _check_properties(data)
-    return data
-
-
 @st.cache_data(max_entries=256, show_spinner=False)
 def _load_cached(path: str, mtime_ns: int, size: int) -> dict:
-    return _read(path)
+    return artifacts.load_geojson(path)
 
 
 def load(path: str) -> dict:
@@ -97,7 +74,7 @@ def load(path: str) -> dict:
     try:
         stat = Path(path).stat()
     except (OSError, TypeError, ValueError):
-        return _read(path)  # 交给校验函数给出统一的错误说明
+        return artifacts.load_geojson(path)  # 交给校验函数给出统一的错误说明
     return _load_cached(str(path), stat.st_mtime_ns, stat.st_size)
 
 

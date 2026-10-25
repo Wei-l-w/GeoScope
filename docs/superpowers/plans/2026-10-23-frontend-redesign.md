@@ -1971,7 +1971,7 @@ git add app/ui.py app/chat_ui.py app/pages tests/test_ui.py && \
 
 **Files:**
 - Modify: `app/map_view.py`（整体重写，末尾保留过渡代码）
-- 不改 `agent/artifacts.py`（规格 1.3 节非目标）：跨日界线经度范围 `longitude_extent` 与属性校验 `_check_properties` 都写在 `app/map_view.py`，见下方"质量复查修正"
+- 不改 `agent/artifacts.py`（规格 1.3 节非目标）：跨日界线经度范围 `longitude_extent` 与属性校验 `_check_properties` 都写在 `app/map_view.py`，见下方"质量复查修正"（`fix/agent-backend` 起属性校验改回 `agent/artifacts.load_geojson`，`map_view` 不再重复）
 - Test: `tests/test_map_layers.py`
 
 **质量复查修正**（代码已按此实现，下方代码块未逐字回改，以本节为准）：
@@ -1979,7 +1979,7 @@ git add app/ui.py app/chat_ui.py app/pages tests/test_ui.py && \
 - 航迹只认 `LineString`，或同时带 `points_total` 与 `points_shown` 的 `Point`。`query_database` 把 SQL 列名原样写成属性，只看 `mmsi` 会把 AIS 点集当成航迹（每行一个 deck 图层）——实测 2000 行时图层数 2000、载荷 1.14 MB。多边形带 `mmsi` 时还会走进航迹分支并 `IndexError`。
 - 同一轮里同名的图层在"· 第 N 轮"之后再加序号：一次回答做两个缓冲区时，两个按钮原本同名。
 - 经度取跨日界线的最短弧（`map_view.longitude_extent`，前端自己遍历几何取经度），`fit_view` 再把中心折回 −180–180。原来一对 ±179° 的点会定位到全球、缩放 2 级。
-- `map_view.load` 读取时增加属性校验（`_check_properties`）：`properties` 必须是对象、值必须是简单值、整数不能溢出 `float`。原来非对象的 `properties` 会让整个页面 `AttributeError`。
+- `map_view.load` 读取时增加属性校验（`_check_properties`）：`properties` 必须是对象、值必须是简单值、整数不能溢出 `float`。原来非对象的 `properties` 会让整个页面 `AttributeError`。`fix/agent-backend` 起这项校验改在 `agent/artifacts.load_geojson`，react 校验工具产出时即拒绝。
 - 下载按钮的 `data` 改成闭包按需读取，文件已被删除时给一行"文件已不可用"，不留点了才报错的按钮。
 
 - [ ] **Step 1: 写测试**
