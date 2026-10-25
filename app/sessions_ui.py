@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-import sys
 
 import streamlit as st
 
@@ -43,9 +42,10 @@ def start_new() -> None:
 
 def session_exists(sid: str | None) -> bool:
     """另一个标签页可能刚把它删掉：打开、清空记忆、提问之前先问一句。
-    list_sessions 默认只取最近 50 个，传 sys.maxsize 才查得到最早的会话；
+    list_sessions 默认只取最近 50 个，要传 limit=None 才查得到最早的会话：DuckDB 的 LIMIT NULL 即不限，
+    1.0–1.5 都如此；不能用 sys.maxsize，DuckDB 1.1 的 LIMIT 上限是 2**62，会直接报错。
     会话库还没建时它返回空列表，这里即为 False。"""
-    return bool(sid) and any(row[0] == sid for row in sessions_mod.list_sessions(limit=sys.maxsize))
+    return bool(sid) and any(row[0] == sid for row in sessions_mod.list_sessions(limit=None))
 
 
 def open_session(sid: str) -> None:

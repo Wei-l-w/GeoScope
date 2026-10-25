@@ -4469,7 +4469,7 @@ git add scripts/capture_screens.py docs/ui-light-1440x900.png docs/ui-dark-1440x
 - 隐藏图层后视野不动、统计出现"（1 个已隐藏）"，"复位"回到最新结果范围；下载 popover 按文件列出两项；
 - 深浅主题切换时控件、图表、底图、图层配色一起变；刷新后打开会话，消息与图层恢复、隐藏状态回到全部显示。
 
-**发现的问题**（修复已移到 `fix/agent-backend` 分支，待单独提 PR：按规格 1.3 节，前端分支不改 `agent/`）
+**发现的问题**（修复放在 `fix/agent-backend` 分支，单独提 PR：按规格 1.3 节，前端分支不改 `agent/`）
 
 1. **地名坐标记成了候选列表第一条**（`agent/tools.py`、`agent/memory.py`）。`geocode` 在线候选页一次返回多个 `lat=…, lon=…`，记忆提取把第一条当成结论，"曼德海峡"于是记成了福州（26.14, 119.13），后续轮次继续沿用。修复（在 `fix/agent-backend`）：记忆只在**恰好一个**坐标时才采信；`geocode` 改为内置地名优先、在线结果明确标注"候选结果（未核实）"。补 8 条 `tests/test_tools_geocode.py` 与多条记忆回归测试（原提交 `4631c16`，本分支已撤回）。
 2. **旧快照会自我延续**（`agent/memory.py`）。修好提取规则后，已存库的 v1 快照仍被信任，刷新也不会变。修复（在 `fix/agent-backend`）：引入 `_MEMORY_VERSION = 2`，版本不符时丢弃快照、从原始聊天记录整体重建——记忆是可丢弃的派生数据。已用变异测试确认（把门槛放宽回接受 v1，新测试立刻变红）。
@@ -4487,5 +4487,5 @@ git add scripts/capture_screens.py docs/ui-light-1440x900.png docs/ui-dark-1440x
 ### 收尾
 
 - 全量回归：`335 passed`；`python -m compileall`、`git diff --check`、ruff（`agent/`、`tests/`、`scripts/`）均通过；
-- 2026-10-25 按规格 1.3 节恢复 `agent/` 之后（`2b6567d` 起）：`330 passed`。只测后端行为的 18 条用例随修复移到 `fix/agent-backend`，另加 13 条前端用例；
+- 2026-10-25 按规格 1.3 节恢复 `agent/` 之后（`2b6567d` 起）：`330 passed`。只测后端行为的 18 条用例移出本分支，其中 17 条随修复进入 `fix/agent-backend`，测 agent 侧 `session_exists` 的 1 条随该函数一并去掉；另加 13 条前端用例；
 - 分支 `feat/frontend-redesign` 领先 `master` 34 个提交。用户选择**保留分支、暂不合并**，等自行查看界面后再定。
