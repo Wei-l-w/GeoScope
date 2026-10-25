@@ -133,7 +133,7 @@ def run_analysis(question: str, sid: str) -> dict:
         # 不能让用户刚看到的图层随回答一起消失，也不能让下载列表里查无此文件。
         paths = paths or list(dict.fromkeys(live_paths))
         status.update(label="分析未完成" if error else "分析完成", state="error" if error else "complete")
-        st.markdown(answer)
+        st.markdown(chat_ui.fix_cjk_bold(answer))
     return {"role": "assistant", "content": answer, "steps": steps, "geojson": paths,
             "tool_records": records, "error": error}
 

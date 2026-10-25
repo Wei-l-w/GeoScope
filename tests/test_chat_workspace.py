@@ -129,6 +129,26 @@ def test_submit_persists_reply_and_tool_evidence(chat_db, monkeypatch):
     assert not process.proto.expanded
 
 
+def test_bold_heading_with_trailing_colon_renders_live_and_in_history(chat_db, monkeypatch):
+    raw = "**船舶与说法：**银河领袖号是一艘汽车运输船。"
+
+    def fake_stream(prompt, history=None, session_id=None):
+        yield {"type": "answer", "result": react.AgentResult(question=prompt, answer=raw)}
+
+    monkeypatch.setattr(react, "stream", fake_stream)
+    app = _app()
+    app.chat_input(key="geoagent_prompt").set_value("银河领袖号是什么船？").run()
+    assert not app.exception
+    # AppTest 在同一次运行里留着流式显示时的元素：历史消息的回答占了原来状态行的位置，
+    # 流式显示的回答还在后面（中间隔着 st.empty），所以这里有两段，两段都要修正。
+    # 夹具里加了工具步骤、结果标签或错误提示，这个数目就会变。
+    shown = [str(element.value) for element in app.chat_message[1].markdown]
+    assert len(shown) == 2
+    assert all(text == "**船舶与说法**：银河领袖号是一艘汽车运输船。" for text in shown)
+    sid = app.session_state["current_session_id"]
+    assert chat_db.load_messages(sid)[1]["content"] == raw  # 只改显示，存档仍是模型原文
+
+
 @pytest.mark.parametrize("failure", ["error_result", "exception", "no_answer"])
 def test_failed_turn_is_nonempty_and_restored_with_history(chat_db, monkeypatch, failure):
     sid = chat_db.create_session("航迹连续分析")

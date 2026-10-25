@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 
 import streamlit as st
 
@@ -177,6 +178,25 @@ def result_chips(message: dict, mode: str, labels: dict | None = None, turn: int
         st.markdown(f'<div class="gs-results">{"".join(chips)}</div>', unsafe_allow_html=True)
 
 
+# CommonMark：收尾的 ** 紧跟在标点后面、后面又直接接文字时不算收尾，星号会原样显示。
+# 中文回答常写"**标题：**正文"，正好踩中；把加粗末尾的分隔标点挪到 ** 外面。
+# 加粗从左到右成对匹配（加粗里不含 * 和换行），免得把前一段的收尾当成下一段的开头；反引号围起的代码原样保留。
+# 以引号、书名号、括号收尾的加粗（如"**“银河领袖号”**是"）不处理：挪出去会拆散配对。
+_CODE_OR_BOLD = re.compile(r"(```.*?```|`[^`\n]+`)|\*\*([^*\n]+?)([：:，,。；;！!？?、]*)\*\*", re.S)
+_WORD = re.compile(r"\w")
+
+
+def fix_cjk_bold(text: str) -> str:
+    """只改显示，会话库里存的仍是模型原文。"""
+    def move(match: re.Match) -> str:
+        code, body, punct = match.groups()
+        if code is None and punct and _WORD.match(text, match.end()):
+            return f"**{body}**{punct}"
+        return match.group(0)
+
+    return _CODE_OR_BOLD.sub(move, text)
+
+
 def render_message(message: dict, mode: str, *, interrupted: bool = False, busy: bool = False,
                    labels: dict | None = None, turn: int | None = None) -> None:
     is_user = message.get("role") == "user"
@@ -190,7 +210,7 @@ def render_message(message: dict, mode: str, *, interrupted: bool = False, busy:
                           disabled=busy, on_click=prefill, args=(content,))
             return
         render_process(message)
-        st.markdown(clean_assistant_text(content))
+        st.markdown(fix_cjk_bold(clean_assistant_text(content)))
         result_chips(message, mode, labels, turn)
         if message.get("error"):
             st.caption("本轮分析未完成，可调整问题后重试。")
