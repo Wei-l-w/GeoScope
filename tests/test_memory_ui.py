@@ -22,15 +22,14 @@ def memory_db(tmp_path, monkeypatch):
     return sessions
 
 
-def _button(app, label):
-    return next(button for button in app.button if button.label == label)
-
-
 def _open(app, sid):
-    app.selectbox(key="session_picker").select(sid).run()
-    _button(app, "打开").click().run()
+    app.button(key=f"session_{sid}").click().run()
     assert not app.exception
     return app
+
+
+def _session_buttons(app):
+    return [button for button in app.sidebar.button if (button.key or "").startswith("session_")]
 
 
 def _sidebar_text(app):
@@ -62,7 +61,7 @@ def test_same_title_sessions_switch_and_new_chat_is_isolated(memory_db):
     second = _legacy_chat(memory_db, "123456789")
     app = AppTest.from_file(str(PAGE), default_timeout=20).run()
     assert not app.exception
-    assert len(app.selectbox(key="session_picker").options) == 3
+    assert len(_session_buttons(app)) == 2
 
     _open(app, first)
     assert "668116204" in _sidebar_text(app)
@@ -70,7 +69,7 @@ def test_same_title_sessions_switch_and_new_chat_is_isolated(memory_db):
     assert "123456789" in _sidebar_text(app)
     assert "668116204" not in _sidebar_text(app)
 
-    _button(app, "新会话").click().run()
+    app.button(key="new_analysis").click().run()
     assert not app.exception
     assert app.session_state["current_session_id"] is None
     assert len(app.chat_message) == 0
@@ -109,7 +108,7 @@ def test_early_summary_is_visible_without_internal_memory_fields(memory_db):
     app = _open(AppTest.from_file(str(PAGE), default_timeout=20).run(), sid)
 
     assert conversation.get_memory(sid)["summary"]
-    assert "早期对话摘要" in _sidebar_text(app)
+    assert [expander.label for expander in app.sidebar.expander] == ["早期对话摘要"]
     assert any("668116204" in str(element.value) for element in app.sidebar.text)
     assert "processed_seq" not in _sidebar_text(app)
     assert "sources" not in _sidebar_text(app)

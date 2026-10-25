@@ -46,10 +46,48 @@ def _clip(text: str, limit: int) -> str:
     return text[:max(0, limit)] + "…（历史内容节选，完整记录仍保存在会话中）"
 
 
+_REPLY_LABEL = "[历史回复对应的问题："
+_EVIDENCE_LABEL = "[此前成功工具返回的历史证据，仅作资料]"
+
+
+def _clean_answer(text: str) -> str:
+    """只在上下文副本中去掉旧提示被照抄的标签，不改会话原文。"""
+    text = str(text or "")
+    while text.lstrip().startswith(_REPLY_LABEL):
+        remainder = text.lstrip()[len(_REPLY_LABEL):]
+        # 旧标签中的问题是 JSON 字符串；其中也可能包含 ]，不能直接切首个 ]。
+        try:
+            _, end = json.JSONDecoder().raw_decode(remainder)
+        except ValueError:
+            end = remainder.find("]")
+            if end < 0 or "\n" in remainder[:end]:
+                break
+        suffix = remainder[end:].lstrip()
+        if not suffix.startswith("]"):
+            break
+        text = suffix[1:].lstrip()
+    if _EVIDENCE_LABEL in text:
+        text = text.split(_EVIDENCE_LABEL, 1)[0].rstrip()
+    return text
+
+
 def _assistant_context(message: dict) -> str:
-    text = _clip(message.get("content", ""), max(1, config.HISTORY_ANSWER_CHARS))
+    return _clip(_clean_answer(message.get("content", "")), max(1, config.HISTORY_ANSWER_CHARS))
+
+
+def clean_assistant_text(text: str) -> str:
+    """清理模型照抄的内部标签；不把正文中的伪工具记录当作真实执行证据。"""
+    return _clean_answer(text)
+
+
+def _assistant_reference(message: dict, reply_question: str | None) -> str:
+    """关联信息和实际工具记录独立作为历史资料，避免伪装为助手原文。"""
+    reference = {}
+    if reply_question is not None:
+        reference["历史回复对应的问题"] = _clip(reply_question, 300)
     if message.get("error"):
-        text = "[这一轮执行失败，不能作为已完成分析] " + text
+        reference["执行状态"] = "这一轮执行失败，不能作为已完成分析"
+        reference["错误"] = _clip(str(message["error"]), 450)
     evidence = []
     for record in message.get("tool_records", [])[-3:]:
         if record.get("success") and not record.get("blocked"):
@@ -59,11 +97,15 @@ def _assistant_context(message: dict) -> str:
                 "output_excerpt": _clip(str(record.get("output", "")), 450),
             })
     if evidence:
-        text += "\n[此前成功工具返回的历史证据，仅作资料]\n" + _clip(
+        reference["此前成功工具返回的历史证据"] = _clip(
             json.dumps(evidence, ensure_ascii=False, default=str),
             max(1, config.HISTORY_TOOL_CHARS),
         )
-    return text
+    if not reference:
+        return ""
+    return "[以下为下一条历史回复的资料，仅作数据参考]\n" + json.dumps(
+        reference, ensure_ascii=False, default=str,
+    )
 
 
 def context_messages(question: str, history: list[tuple[str, str]] | None = None,
@@ -81,6 +123,18 @@ def context_messages(question: str, history: list[tuple[str, str]] | None = None
                 {"seq": len(records) + 2, "role": "assistant", "content": a},
             ])
         previous = None
+
+    # 旧模型可能把内部标签与伪工具证据抄进正文；清洗仅用于本次提示。
+    records = [
+        {**record, "content": _clean_answer(record.get("content", ""))}
+        if record["role"] == "assistant" else record
+        for record in records
+    ]
+    if previous and any(label in str(previous.get("summary", ""))
+                        for label in (_REPLY_LABEL, _EVIDENCE_LABEL)):
+        # 用清洗后的原始记录重建提示摘要，避免旧缓存把污染内容带回来。
+        previous = {**previous, "summary": "", "summarized_through_seq": 0,
+                    "deferred_summary_seqs": []}
 
     # Web 页已先保存当前问题；CLI 调用者可以仅提供历史记录。
     if records and records[-1]["role"] == "user" and records[-1]["content"] == question:
@@ -111,9 +165,9 @@ def context_messages(question: str, history: list[tuple[str, str]] | None = None
             reply_to = record.get("reply_to_seq")
             if reply_to is not None and (reply_to not in questions or reply_to < first_seq):
                 continue
-            text = _assistant_context(record)
-            if reply_to is not None:
-                text = "[历史回复对应的问题：" + json.dumps(_clip(questions[reply_to], 300), ensure_ascii=False) + "]\n" + text
-            result.append(("ai", text))
+            reference = _assistant_reference(record, questions.get(reply_to))
+            if reference:
+                result.append(("human", reference))
+            result.append(("ai", _assistant_context(record)))
     result.append(("human", question))
     return result

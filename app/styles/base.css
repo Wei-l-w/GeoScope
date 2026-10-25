@@ -1,0 +1,63 @@
+/* GeoScope 设计令牌：light-dark() 跟随 Streamlit 写在 .stApp 上的 color-scheme，
+   切换主题不需要重跑脚本。自己输出的 HTML 只用这些令牌取色（设计文档 4.2）。 */
+.stApp {
+  --gs-panel: light-dark(#FFFFFF, #111827);
+  --gs-soft: light-dark(#F7F7F4, #0D1420);
+  --gs-line: light-dark(#E4E3DE, #243044);
+  --gs-text: light-dark(#1B1D1F, #E7ECF3);
+  --gs-muted: light-dark(#6A6F73, #8B97A8);
+  --gs-accent: light-dark(#0F766E, #F5B83D);
+  --gs-accent-soft: light-dark(#E3F1EE, rgba(245, 184, 61, .14));
+  --gs-accent-ink: light-dark(#FFFFFF, #1A1203);
+  --gs-user: light-dark(#EEF0EC, rgba(56, 213, 245, .10));
+  --gs-user-line: light-dark(transparent, rgba(56, 213, 245, .28));
+  --gs-ok: light-dark(#15803D, #34D399);
+}
+
+/* 主题监听组件不显示内容 */
+.st-key-geoscope_theme_watch { display: none; }
+
+/* 页头 */
+.gs-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--gs-line); }
+.gs-header h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -.01em; margin: 0; padding: 0; color: var(--gs-text); }
+.gs-header p { margin: .35rem 0 0; color: var(--gs-muted); font-size: .875rem; }
+.gs-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.gs-tag { font-size: .75rem; color: var(--gs-muted); border: 1px solid var(--gs-line); border-radius: 999px;
+  padding: 3px 10px; background: var(--gs-panel); }
+.gs-tag.live::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--gs-ok); margin-right: 6px; vertical-align: 1px; }
+
+/* KPI 卡片：左侧色条用数据源色 */
+.gs-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: .8rem 0 1rem; }
+.gs-kpi { background: var(--gs-panel); border: 1px solid var(--gs-line); border-radius: 12px;
+  padding: 14px 16px 12px 18px; position: relative; }
+.gs-kpi::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--kc, var(--gs-accent)); }
+.gs-kpi .l { font-size: .8rem; color: var(--gs-muted); }
+.gs-kpi .v { font-size: 1.6rem; font-weight: 700; margin-top: 2px; color: var(--gs-text); letter-spacing: -.01em; }
+.gs-kpi .c { font-size: .75rem; color: var(--gs-muted); margin-top: 2px; }
+
+/* 区块标题 */
+.gs-panel-t { font-size: 1rem; font-weight: 650; color: var(--gs-text); margin: 1rem 0 .5rem;
+  display: flex; align-items: center; gap: 8px; }
+.gs-panel-t::before { content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--gs-accent); }
+
+/* 图例 */
+.gs-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: .55rem 0 .2rem; font-size: .8rem; color: var(--gs-muted); }
+.gs-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+
+/* 新闻条目 */
+.gs-news { border-left: 2px solid var(--gs-line); padding: 2px 0 2px 12px; margin-bottom: 11px; }
+.gs-news:hover { border-left-color: var(--gs-accent); }
+.gs-news .m { font-size: .75rem; color: var(--gs-muted); }
+.gs-news .h { font-size: .875rem; color: var(--gs-text); line-height: 1.5; }
+
+/* ---- 增强样式（设计文档 4.3 登记表）：失效时只退回原生外观 ---- */
+/* #1 深色主题下主按钮用深色字（琥珀底白字对比度只有 1.78） */
+.stApp [data-testid="stBaseButton-primary"]:not(:disabled),
+.stApp [data-testid="stBaseButton-primary"]:not(:disabled) p { color: var(--gs-accent-ink); }
+/* #2 主区域留白收紧 */
+.stApp [data-testid="stMainBlockContainer"] { padding: 4rem 1.5rem 1.5rem; }
+/* #3 地图圆角描边 */
+.stApp [data-testid="stDeckGlJsonChart"] { border: 1px solid var(--gs-line); border-radius: 12px; overflow: hidden; }

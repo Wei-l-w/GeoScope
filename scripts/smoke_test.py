@@ -11,7 +11,9 @@ from unittest.mock import patch
 from streamlit.testing.v1 import AppTest
 
 ROOT = Path(__file__).resolve().parents[1]
-PAGES = [ROOT / "app" / "GeoAgent.py"] + sorted((ROOT / "app" / "pages").glob("*.py"))
+PAGES = [ROOT / "app" / "GeoAgent.py"] + sorted((ROOT / "app" / "dashboards").glob("*.py"))
+if len(PAGES) != 7:  # 看板页若被改名或清空，这里必须报错，而不是打印一个更小的"N/N 通过"
+    raise SystemExit(f"预期 1 个工作台 + 6 个看板页，实际找到 {len(PAGES)} 个页面")
 
 
 def main() -> int:

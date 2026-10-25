@@ -1,9 +1,47 @@
+# 原生双主题：右上角 ⋮ → System / Light / Dark，默认跟随系统（设计文档 4.1）。
+# 自定义 HTML 的颜色在 app/styles/base.css 的 light-dark() 令牌里，deck.gl 图层在 app/palette.py。
+
 [theme]
-base = "dark"
-primaryColor = "#22d3ee"
-backgroundColor = "#0b1120"
-secondaryBackgroundColor = "#111a2e"
-textColor = "#e2e8f0"
+font = "Segoe UI Variable Text, Segoe UI, PingFang SC, Microsoft YaHei UI, Noto Sans SC, sans-serif"
+codeFont = "Cascadia Mono, JetBrains Mono, Consolas, monospace"
+baseRadius = "0.6rem"
+showWidgetBorder = true
+headingFontSizes = ["1.75rem", "1.375rem", "1.125rem", "1rem", "0.9rem", "0.8rem"]
+# 只能全局配一套（写在 light/dark 子表里会被忽略）；前 8 个与 app/palette.py 的 PALETTE 一致。
+# 必须正好 10 个：Streamlit 的 Plotly 模板有 10 个占位色，少配的会被替换成 "undefined"，
+# 整套 colorway 失效、图表退回 Plotly 默认色。第 9、10 个循环使用第 1、2 个。
+chartCategoricalColors = ["#2563EB", "#C2410C", "#0D9488", "#B45309", "#DB2777", "#8B5CF6", "#15803D", "#DC2626", "#2563EB", "#C2410C"]
+
+[theme.light]
+primaryColor = "#0F766E"
+backgroundColor = "#F5F5F2"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1B1D1F"
+borderColor = "#E4E3DE"
+linkColor = "#0F766E"
+codeBackgroundColor = "#F0F0EC"
+dataframeHeaderBackgroundColor = "#F7F7F4"
+
+[theme.light.sidebar]
+backgroundColor = "#EEEEEA"
+secondaryBackgroundColor = "#FFFFFF"
+
+[theme.dark]
+primaryColor = "#F5B83D"
+backgroundColor = "#0A0F1A"
+secondaryBackgroundColor = "#111827"
+textColor = "#E7ECF3"
+borderColor = "#243044"
+linkColor = "#F5B83D"
+codeBackgroundColor = "#0D1420"
+dataframeHeaderBackgroundColor = "#0D1420"
+
+[theme.dark.sidebar]
+backgroundColor = "#0C121E"
+secondaryBackgroundColor = "#111827"
+
+[client]
+toolbarMode = "viewer"
 
 [server]
 headless = true

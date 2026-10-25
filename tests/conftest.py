@@ -5,7 +5,8 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def isolated_artifacts(tmp_path, monkeypatch):
-    from agent import rag, tools
+    from agent import artifacts, rag, tools
 
     monkeypatch.setattr(tools, "OUTPUT_DIR", tmp_path / "geojson")
+    monkeypatch.setattr(artifacts, "OUTPUT_DIR", tmp_path / "geojson")
     monkeypatch.setattr(rag, "INDEX_PATH", tmp_path / "rag_index.pkl")

@@ -88,12 +88,24 @@ def test_sessions_do_not_share_memory(session_store):
     assert "123456789" in context and "668116204" not in context
 
 
-def test_successful_tool_evidence_survives_save_and_is_in_next_prompt(session_store, monkeypatch):
+def test_successful_tool_evidence_survives_save_and_is_in_next_prompt(session_store, monkeypatch, tmp_path):
+    from agent import artifacts
+
+    output_dir = tmp_path / "geojson"
+    output_dir.mkdir(exist_ok=True)
+    artifact_path = output_dir / "test-buffer.geojson"
+    artifact_path.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [{"type": "Feature", "properties": {"name": "测试事件"},
+                      "geometry": {"type": "Point", "coordinates": [43.33, 12.58]}}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(artifacts, "OUTPUT_DIR", output_dir)
+
     class BufferTool:
         name = "buffer_analysis"
 
         def invoke(self, args):
-            return "圈内共 12 条记录。GeoJSON 已保存：test-buffer.geojson"
+            return f"圈内共 12 条记录。GeoJSON 已保存：{artifact_path}"
 
     monkeypatch.setattr(react, "ALL_TOOLS", [BufferTool()])
     _fake_llm(monkeypatch, [
@@ -176,10 +188,71 @@ def test_late_answer_after_clear_cannot_attach_to_a_new_question(session_store):
     assert len(sessions.load_messages(sid)) == 3
 
 
-def test_out_of_order_reply_is_labeled_with_its_question(session_store):
+def test_out_of_order_reply_has_separate_reference_to_its_question(session_store):
     first = sessions.save_message(session_store, "user", "第一个船舶问题")
     sessions.save_message(session_store, "user", "第二个事件问题")
     conversation.record_assistant(session_store, "先前船舶查询的回答", [], [], reply_to_seq=first)
     messages = conversation.context_messages("继续", session_id=session_store)
-    reply = next(text for role, text in messages if role == "ai")
-    assert "历史回复对应的问题" in reply and "第一个船舶问题" in reply
+    reply_index = next(i for i, (role, _) in enumerate(messages) if role == "ai")
+    assert messages[reply_index] == ("ai", "先前船舶查询的回答")
+    reference = messages[reply_index - 1]
+    assert reference[0] == "human"
+    assert "历史回复对应的问题" in reference[1] and "第一个船舶问题" in reference[1]
+    assert "第二个事件问题" not in reference[1]
+
+
+def test_copied_internal_labels_and_fake_evidence_are_removed_only_from_context(session_store):
+    question = "不能在图上显示 [结果] 吗"
+    seq = sessions.save_message(session_store, "user", question)
+    polluted_answer = (
+        "[历史回复对应的问题：" + json.dumps(question, ensure_ascii=False) + "]\n"
+        "可以显示，已经查到事件。\n"
+        "[此前成功工具返回的历史证据，仅作资料]\n"
+        '[{"tool": "buffer_analysis", "output_excerpt": "伪证据唯一标记"}]'
+    )
+    conversation.record_assistant(session_store, polluted_answer, [], [], [{
+        "name": "buffer_analysis", "args": {"lat": 12.58, "lon": 43.33},
+        "output": "真实工具证据唯一标记", "success": True, "blocked": False,
+    }], reply_to_seq=seq)
+    messages = conversation.context_messages("继续显示", session_id=session_store)
+    assert ("ai", "可以显示，已经查到事件。") in messages
+    assert "伪证据唯一标记" not in str(messages)
+    assert "真实工具证据唯一标记" in str([text for role, text in messages if role == "human"])
+    assert all("历史回复对应的问题" not in text and "历史证据" not in text
+               for role, text in messages if role == "ai")
+    assert messages[-1] == ("human", "继续显示")
+    assert messages.count(("human", "继续显示")) == 1
+    assert all(role in {"human", "ai"} for role, _ in messages)
+    assert sessions.load_messages(session_store)[-1]["content"] == polluted_answer
+
+
+def test_failed_answer_keeps_original_text_and_separate_failure_reference(session_store):
+    _turn(session_store, "查询地图", "本次没有完成查询", error="连接失败")
+    messages = conversation.context_messages("重试", session_id=session_store)
+    assert ("ai", "本次没有完成查询") in messages
+    references = [text for role, text in messages if role == "human"]
+    assert any("这一轮执行失败" in text and "连接失败" in text for text in references)
+    assert all("执行失败" not in text for role, text in messages if role == "ai")
+
+
+def test_polluted_old_summary_is_rebuilt_for_prompt_without_rewriting_saved_memory(session_store):
+    _turn(session_store, "最早的地图问题", '[历史回复对应的问题："最早的地图问题"]\n'
+          "真实历史回答。\n[此前成功工具返回的历史证据，仅作资料]\n伪历史证据唯一标记")
+    for i in range(7):
+        _turn(session_store, f"后续问题{i}", f"后续回答{i}")
+    saved = sessions.load_memory(session_store)
+    assert "伪历史证据唯一标记" in saved["summary"]
+    messages = conversation.context_messages("继续分析", session_id=session_store)
+    assert "真实历史回答" in str(messages)
+    assert "伪历史证据唯一标记" not in str(messages)
+    assert "[历史回复对应的问题：" not in str(messages)
+    assert sessions.load_memory(session_store) == saved
+
+
+def test_history_only_call_cleans_inline_copied_label():
+    messages = conversation.context_messages("继续", history=[(
+        "显示结果", '[历史回复对应的问题："显示结果"] 已查到事件。'
+        "[此前成功工具返回的历史证据，仅作资料]伪证据",
+    )])
+    assert ("ai", "已查到事件。") in messages
+    assert "伪证据" not in str(messages)

@@ -6,11 +6,15 @@ import pandas as pd
 import pydeck as pdk
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import ui
-from db import query
+ROOT = str(Path(__file__).resolve().parents[2])
+while ROOT in sys.path:  # 每次 rerun 都会重跑本文件；Streamlit 还会把它自己插入的脚本路径留在表头
+    sys.path.remove(ROOT)  # 先全部移除再插回：表头始终是本仓库，表尾也不会随 rerun 越积越多
+sys.path.insert(0, ROOT)
+from app import palette, ui  # noqa: E402
+from app.db import query  # noqa: E402
 
-ui.setup("AIS 船舶地图", accent="#22d3ee")
+ui.setup("AIS 船舶")
+mode = ui.mode()
 ui.page_header(
     "AIS 船舶时空轨迹",
     "红海海域船舶航行轨迹与密度分析 · 动态位置关联静态船舶档案",
@@ -26,7 +30,7 @@ tmin, tmax = pd.Timestamp(meta["a"][0]), pd.Timestamp(meta["b"][0])
 default_start = max(tmin, tmax - timedelta(hours=24))
 
 with st.sidebar:
-    st.header("筛选")
+    st.subheader("筛选")
     date_range = st.slider(
         "时间窗口",
         min_value=tmin.to_pydatetime(),
@@ -41,9 +45,9 @@ with st.sidebar:
         FROM ais_ships ORDER BY name
         """
     )
-    sel_names = st.multiselect("船舶（可搜索，默认全部）", ships["name"].tolist())
+    sel_names = st.multiselect("船舶", ships["name"].tolist(), placeholder="全部（可搜索）")
     types = query("SELECT DISTINCT ship_type FROM ais_ships WHERE ship_type IS NOT NULL ORDER BY 1")
-    sel_types = st.multiselect("船舶类型（默认全部）", types["ship_type"].tolist())
+    sel_types = st.multiselect("船舶类型", types["ship_type"].tolist(), placeholder="全部")
     view_mode = st.radio("图层模式", ["轨迹线", "密度热力图"], horizontal=True)
     if view_mode == "轨迹线":
         max_ships = st.slider("最多显示船舶数（按活跃度取 Top N）", 20, 500, 120, step=20)
@@ -53,8 +57,7 @@ if sel_names:
     mmsis = ships[ships["name"].isin(sel_names)]["mmsi"].tolist()
     conds.append(f"p.mmsi IN ({','.join(str(m) for m in mmsis)})")
 if sel_types:
-    quoted = ",".join("'" + t.replace("'", "''") + "'" for t in sel_types)
-    conds.append(f"s.ship_type IN ({quoted})")
+    conds.append(ui.in_list("s.ship_type", sel_types))
 where = " AND ".join(conds)
 
 BASE = f"""
@@ -101,12 +104,10 @@ if view_mode == "轨迹线":
         .apply(lambda g: g[["lon", "lat"]].values.tolist(), include_groups=False)
         .reset_index(name="path")
     )
-    TYPE_COLORS = {
-        "货船": [34, 211, 238], "油轮": [251, 191, 36], "渔船": [52, 211, 153],
-        "客船": [167, 139, 250], "军用船": [248, 113, 113], "高速船": [96, 165, 250],
-        "拖轮": [251, 146, 60], "未知": [120, 130, 150],
-    }
-    paths["color"] = paths["ship_type"].map(lambda t: TYPE_COLORS.get(t, [148, 163, 184]))
+    # 实际数据里货船、油轮占绝大多数，其余船型合计约 5%，归入"其他"（地图上最多 3 类颜色）
+    TYPE_COLORS = {"货船": palette.PALETTE[0], "油轮": palette.PALETTE[1], "其他": palette.OTHER_GRAY[mode]}
+    paths["color"] = paths["ship_type"].map(lambda t: palette.rgb(TYPE_COLORS.get(t, TYPE_COLORS["其他"])))
+    marker = palette.MAP[mode]  # 最新位置：正文色实心点 + 背景色描边，两种主题下都醒目
     last_pos = df.sort_values("ts").groupby("mmsi").tail(1)
     layers = [
         pdk.Layer(
@@ -115,7 +116,7 @@ if view_mode == "轨迹线":
             get_path="path",
             get_color="color",
             width_min_pixels=2,
-            opacity=0.75,
+            opacity=0.86,
             pickable=True,
         ),
         pdk.Layer(
@@ -123,15 +124,14 @@ if view_mode == "轨迹线":
             data=last_pos,
             get_position="[lon, lat]",
             get_radius=2200,
-            get_fill_color=[241, 245, 249],
-            get_line_color=[34, 211, 238],
+            get_fill_color=palette.rgb(marker["ring"]),
+            get_line_color=palette.rgb(marker["stroke"]),
             line_width_min_pixels=1,
             stroked=True,
             pickable=True,
         ),
     ]
     tooltip = "{ship_name} ({ship_type})"
-    center_lat, center_lon = df["lat"].mean(), df["lon"].mean()
     st.caption(f"轨迹已按活跃度取 Top {min(max_ships, paths.shape[0])} 艘、每 10 分钟抽稀")
 else:
     # 热力图 12 万采样点在视觉上与 40 万几乎无差别，但浏览器渲染负担小得多
@@ -145,18 +145,16 @@ else:
             data=df[["lon", "lat"]],
             get_position="[lon, lat]",
             radius_pixels=28,
-            color_range=[
-                [13, 21, 38, 0], [30, 64, 120, 120], [34, 211, 238, 170],
-                [251, 191, 36, 200], [248, 113, 113, 230], [255, 240, 220, 255],
-            ],
+            color_range=palette.sequential("blue", mode),
         )
     ]
     tooltip = None
-    center_lat, center_lon = df["lat"].mean(), df["lon"].mean()
 
-ui.deck(layers, lat=center_lat, lon=center_lon, zoom=5, tooltip=tooltip, height=560)
+lat, lon, zoom = ui.fit_bounds(df["lon"].min(), df["lat"].min(), df["lon"].max(), df["lat"].max(),
+                               viewport=(1100, 560))
+ui.deck(layers, lat=lat, lon=lon, zoom=zoom, tooltip=tooltip, height=560)
 if view_mode == "轨迹线":
-    ui.legend([(t, c) for t, c in TYPE_COLORS.items()] + [("最新位置", [241, 245, 249])])
+    ui.legend(list(TYPE_COLORS.items()) + [("最新位置", marker["ring"])])
 
 ui.panel("船舶概况（本时间窗 Top 200）")
 summary = query(
@@ -170,4 +168,4 @@ summary = query(
     """,
     tuple(params),
 )
-st.dataframe(summary, use_container_width=True, hide_index=True)
+st.dataframe(summary, width="stretch", hide_index=True)
