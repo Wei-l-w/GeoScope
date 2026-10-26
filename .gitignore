@@ -10,6 +10,8 @@ data/*.duckdb.wal
 *.csv
 *.jsonl
 *.parquet
+# 例外：GeoSQL 评测集只有手工标注的问题和金标 SQL，不含数据行，必须随仓库发布才能复现评测
+!eval/geosql_eval.jsonl
 
 # ---- 密钥 ----
 .streamlit/secrets.toml
