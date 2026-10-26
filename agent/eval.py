@@ -19,7 +19,7 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 
-from . import config, db, geosql
+from . import config, db, geosql, model_config
 
 EVAL_FILE = config.ROOT / "eval" / "geosql_eval.jsonl"
 
@@ -47,17 +47,24 @@ def _load_cases(tag: str | None, limit: int | None) -> list[dict]:
 
 def run_eval(cases: list[dict]) -> tuple[list[dict], dict]:
     details = []
+    # 整批评测用开跑时那一套配置；若外层已冻结（从工作台/CLI 里调起来）就复用它，
+    # 中途在界面里换了模型，不能让后半段偷偷换人却记在前者名下
+    settings = model_config.active()
+    secrets = model_config.key_snapshot(settings.api_key)
+    model = settings.model
     with db.connect() as con:
         for i, case in enumerate(cases, 1):
             t0 = time.time()
             gold_rows = _norm_rows(con.execute(case["gold_sql"]).fetchall())
             try:
-                pred = geosql.ask(case["question"], verbose=False)
-                pred_error = pred.error
+                pred = geosql.ask(case["question"], verbose=False, settings=settings)
+                # geosql 已经脱敏过；评测报告是要落盘的产物，这里再兜一道，
+                # 免得将来换实现或换调用方时密钥顺着报告写进文件。
+                pred_error = model_config.redact(pred.error, secrets) if pred.error else None
             except Exception as e:
                 # 单条用例异常（如代理长时间故障）不应中断整个评测
                 pred = geosql.GeoSQLResult(question=case["question"])
-                pred_error = f"评测执行异常：{type(e).__name__}: {e}"
+                pred_error = model_config.redact(f"评测执行异常：{type(e).__name__}: {e}", secrets)
             elapsed = time.time() - t0
 
             if pred_error is None and pred.truncated:
@@ -80,6 +87,7 @@ def run_eval(cases: list[dict]) -> tuple[list[dict], dict]:
     passed = sum(1 for d in details if d["match"])
     corrected = sum(1 for d in details if d["match"] and d["attempts"] > 1)
     summary = {
+        "model": model,
         "total": len(details), "passed": passed,
         "accuracy": round(passed / len(details) * 100, 1) if details else 0.0,
         "self_corrected": corrected,
@@ -93,7 +101,7 @@ def write_report(details: list[dict], summary: dict, out: Path) -> None:
     lines = [
         "# GeoSQL 评测报告",
         "",
-        f"- 模型：`{config.MODEL_NAME}`",
+        f"- 模型：`{summary['model']}`",
         f"- 执行准确率（execution accuracy）：**{summary['passed']}/{summary['total']} = {summary['accuracy']}%**",
         f"- 其中经自纠正后通过：{summary['self_corrected']} 条",
         f"- 平均尝试次数：{summary['avg_attempts']}；平均单条耗时：{summary['avg_elapsed_s']}s",

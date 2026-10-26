@@ -24,6 +24,9 @@ def _fake_llm(monkeypatch, answers):
     captured = []
 
     class LLM:
+        def __init__(self, *args, **kwargs):
+            pass
+
         def bind_tools(self, _):
             return self
 

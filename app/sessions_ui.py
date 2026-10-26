@@ -8,6 +8,7 @@ import streamlit as st
 
 from agent import conversation
 from agent import sessions as sessions_mod
+from app import model_ui
 
 PROMPT_KEY = "geoagent_prompt"
 MEMORY_FIELDS = [
@@ -86,6 +87,7 @@ def render(busy: bool) -> dict:
                           width="stretch", disabled=busy, help=f"{count} 条消息 · 创建于 {when}",
                           on_click=open_session, args=(sid,))
         render_memory(current, busy)
+        model_ui.render(busy)
     return titles
 
 

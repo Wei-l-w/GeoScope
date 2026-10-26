@@ -14,13 +14,19 @@ import sys
 
 
 def _run_agent(question: str) -> int:
-    from . import react
+    from . import model_config, react
 
-    try:
-        result = react.run(question)
-    except RuntimeError as e:
-        print(str(e), file=sys.stderr)
-        return 2
+    # 冻结这一轮的配置与密钥：兜底出口也不能在出错时才去读配置，
+    # 那时别的标签页可能已经换了 Key，而异常里回显的是这一轮真正用过的旧 Key。
+    with model_config.frozen() as (_, secrets):
+        try:
+            result = react.run(question)
+        except RuntimeError as e:
+            print(model_config.redact(str(e), secrets), file=sys.stderr)
+            return 2
+        except Exception as e:  # 兜底：不要把带密钥的异常栈直接打到终端
+            print(model_config.redact(f"{type(e).__name__}: {e}", secrets), file=sys.stderr)
+            return 2
     print("=" * 60)
     print(result.answer)
     if result.geojson_paths:
@@ -35,12 +41,18 @@ def _run_agent(question: str) -> int:
 
 def _run_direct(args) -> int:
     from . import geosql  # 延迟导入，--help 不需要 LLM 配置
+    from . import model_config
 
-    try:
-        result = geosql.ask(args.question)
-    except RuntimeError as e:  # 未配置 API Key 等环境问题的友好提示
-        print(str(e), file=sys.stderr)
-        return 2
+    # 同 _run_agent：冻结本轮配置，兜底报错用这一轮真正用过的密钥脱敏
+    with model_config.frozen() as (_, secrets):
+        try:
+            result = geosql.ask(args.question)
+        except RuntimeError as e:  # 未配置 API Key 等环境问题的友好提示
+            print(model_config.redact(str(e), secrets), file=sys.stderr)
+            return 2
+        except Exception as e:  # 兜底：不要把带密钥的异常栈直接打到终端
+            print(model_config.redact(f"{type(e).__name__}: {e}", secrets), file=sys.stderr)
+            return 2
     if not result.ok:
         print(f"查询失败：{result.error}", file=sys.stderr)
         return 1

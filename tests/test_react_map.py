@@ -13,6 +13,9 @@ def _llm(monkeypatch, replies):
     responses = iter(replies)
 
     class Model:
+        def __init__(self, *args, **kwargs):
+            pass
+
         def bind_tools(self, tools):
             return self
 
@@ -106,7 +109,7 @@ def test_existing_real_map_restores_without_model_call(tmp_path, monkeypatch):
     seq = sessions.save_message(sid, "user", "缓冲区分析")
     sessions.save_message(sid, "assistant", "范围内零事件", geojson=[str(path)], reply_to_seq=seq)
 
-    def no_llm():
+    def no_llm(settings=None):
         raise AssertionError("恢复已验证地图不需要模型")
 
     monkeypatch.setattr(react, "_get_llm", no_llm)

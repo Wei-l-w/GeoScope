@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from . import config, db, fewshot, sql_guard
+from . import config, db, fewshot, model_config, sql_guard
 
 SYSTEM_PROMPT = """你是一个空间数据分析专家，负责把用户的自然语言问题转成 DuckDB SQL（GeoSQL）。
 
@@ -61,14 +61,20 @@ class GeoSQLResult:
         return self.error is None
 
 
-def _get_llm():
-    config.check_llm_ready()
-    from langchain_openai import ChatOpenAI
+def _get_llm(settings=None):
+    """按当前（或传入的）模型配置建客户端。
 
+    base_url 走 model_config.resolve_base_url：留空表示官方接口，必须显式写出来，
+    否则客户端会回读 OPENAI_BASE_URL / OPENAI_API_BASE，把新 Key 发到旧代理。
+    """
+    from langchain_openai import ChatOpenAI  # 延迟导入：跑离线评测和测试时不必装 langchain
+
+    settings = settings or model_config.active()  # 本轮冻结的配置优先，其次界面保存的，再次 .env
+    config.check_llm_ready(settings)  # 缺 Key 时给出可操作的报错
     return ChatOpenAI(
-        model=config.MODEL_NAME,
-        api_key=config.OPENAI_API_KEY,
-        base_url=config.OPENAI_BASE_URL,
+        model=settings.model,
+        api_key=settings.api_key,
+        base_url=model_config.resolve_base_url(settings.base_url),
         temperature=0,
         timeout=config.LLM_TIMEOUT,        # 代理延迟高，默认超时容易误杀
         max_retries=config.LLM_RETRIES,    # 超时/限流自动重试
@@ -88,10 +94,25 @@ def _build_user_prompt(question: str, spatial_ok: bool) -> str:
     return f"参考例题：\n{ex_text}\n\n用户问题：{question}"
 
 
-def ask(question: str, verbose: bool = True) -> GeoSQLResult:
-    """主入口：自然语言 -> GeoSQL -> 执行结果。"""
+def ask(question: str, verbose: bool = True, settings=None) -> GeoSQLResult:
+    """主入口：自然语言 -> GeoSQL -> 执行结果。
+
+    settings 用于评测等"整批使用同一套配置"的场景；不传就用本轮冻结的配置
+    （agent.react / agent.eval 已冻结），都没有才现读一次——嵌套调用因此不会中途换模型。
+    密钥一律用开跑时冻结的那一份脱敏：跑到一半别的标签页换了 Key，
+    报错里回显的还是这一轮真正用过的旧 Key，事后再读配置就漏了。
+    """
     result = GeoSQLResult(question=question)
-    llm = _get_llm()
+    settings = settings or model_config.active()
+    secrets = model_config.key_snapshot(settings.api_key)
+    try:
+        llm = _get_llm(settings)
+    except RuntimeError as e:
+        # 未配置 Key：保留原来的友好报错和 CLI 的退出码。原异常链里可能带密钥，不把它挂上去。
+        raise RuntimeError(model_config.redact(str(e), secrets)) from None
+    except Exception as e:  # 其它初始化失败也不能把密钥带出去（配置错误有时会回显请求头）
+        result.error = model_config.redact(f"LLM 初始化失败：{type(e).__name__}: {e}", secrets)
+        return result
 
     with db.connect() as con:
         spatial_ok = db.has_spatial(con)
@@ -108,7 +129,7 @@ def ask(question: str, verbose: bool = True) -> GeoSQLResult:
                 resp = llm.invoke(messages)
             except Exception as e:
                 # LLM 网络异常（代理 502/超时等）：算作一次失败尝试，继续重试
-                last_error = f"LLM 请求失败：{type(e).__name__}: {e}"
+                last_error = model_config.redact(f"LLM 请求失败：{type(e).__name__}: {e}", secrets)
                 if verbose:
                     print(f"[第 {attempt} 次尝试] {last_error}\n")
                 continue
@@ -125,10 +146,10 @@ def ask(question: str, verbose: bool = True) -> GeoSQLResult:
                 result.columns, result.rows, result.truncated = sql_guard.execute_query(con, sql)
                 return result
             except Exception as e:  # 自纠正：报错回传 LLM
-                last_error = str(e)
+                last_error = model_config.redact(str(e), secrets)
                 if verbose:
                     print(f"[执行失败] {last_error}\n")
                 messages += [("human", RETRY_PROMPT.format(sql=sql, error=last_error))]
 
-        result.error = f"重试 {config.MAX_RETRIES} 次仍失败，最后的错误：{last_error}"
+        result.error = model_config.redact(f"重试 {config.MAX_RETRIES} 次仍失败，最后的错误：{last_error}", secrets)
         return result

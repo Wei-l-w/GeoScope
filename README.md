@@ -69,6 +69,8 @@ pip install -r requirements.txt
 #   OPENAI_API_KEY=sk-...
 #   OPENAI_BASE_URL=https://api.deepseek.com
 #   MODEL_NAME=deepseek-chat
+# 也可以启动后在侧栏底部「模型 · …」里直接填写并保存（存在 data/model_settings.json，
+# 优先于 .env，不进 git；保存前会先试连一次），改完不必重启。
 
 # 1. 生成仿真样例数据并入库（真实数据到位前先跑通全流程）
 #    用过旧版样例建过库的，先删掉 data/warehouse.duckdb 再按下面重建，避免旧档案残留

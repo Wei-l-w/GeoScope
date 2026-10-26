@@ -16,7 +16,7 @@ PAGE = Path(__file__).resolve().parents[1] / "app" / "GeoAgent.py"
 def chat_db(tmp_path, monkeypatch):
     monkeypatch.setattr(sessions, "DB_PATH", tmp_path / "sessions.duckdb")
 
-    def forbidden_model():
+    def forbidden_model(settings=None):
         raise AssertionError("聊天工作区回归不得调用模型 API")
 
     monkeypatch.setattr(react, "_get_llm", forbidden_model)
