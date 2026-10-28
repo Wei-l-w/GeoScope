@@ -51,7 +51,7 @@ def setup_agent(monkeypatch, answers):
     tools = {name: FakeTool(name) for name in ("knowledge_search", "query_database")}
     llm = FakeLLM(answers)
     monkeypatch.setattr(react, "ALL_TOOLS", list(tools.values()))
-    monkeypatch.setattr(react, "_get_llm", lambda: llm)
+    monkeypatch.setattr(react, "_get_llm", lambda settings=None: llm)
     return llm, tools
 
 
@@ -131,7 +131,7 @@ def test_empty_model_answer_returns_explicit_failure(monkeypatch):
 
 
 def test_llm_initialization_failure_returns_result(monkeypatch):
-    def fail():
+    def fail(settings=None):
         raise RuntimeError("未配置模型")
 
     monkeypatch.setattr(react, "_get_llm", fail)

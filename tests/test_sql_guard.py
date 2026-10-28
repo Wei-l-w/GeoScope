@@ -94,7 +94,7 @@ def test_ask_retries_invalid_sql_then_returns_capped_result(monkeypatch):
         prompts.append(list(messages))
         return SimpleNamespace(content=next(replies))
 
-    monkeypatch.setattr(geosql, "_get_llm", lambda: SimpleNamespace(invoke=invoke))
+    monkeypatch.setattr(geosql, "_get_llm", lambda settings=None: SimpleNamespace(invoke=invoke))
     monkeypatch.setattr(db, "connect", lambda: con)
     monkeypatch.setattr(db, "has_spatial", lambda _: False)
     monkeypatch.setattr(geosql.config, "MAX_QUERY_ROWS", 3)

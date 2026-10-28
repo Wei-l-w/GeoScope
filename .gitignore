@@ -14,6 +14,9 @@ data/*.duckdb.wal
 # ---- 密钥 ----
 .streamlit/secrets.toml
 .env
+# 工作台侧栏「模型设置」保存的内容（明文 API Key）。行内不能跟注释：gitignore 会把 # 之后当成模式的一部分
+data/model_settings.json
+data/model_settings.json.tmp
 
 # ---- 本地调试产物 ----
 .playwright-cli/

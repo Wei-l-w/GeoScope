@@ -54,11 +54,20 @@ HISTORY_TOOL_CHARS = int(os.environ.get("AGENT_HISTORY_TOOL_CHARS", "1600"))
 MEMORY_SUMMARY_CHARS = int(os.environ.get("AGENT_MEMORY_SUMMARY_CHARS", "3000"))
 
 
-def check_llm_ready() -> None:
-    """调用 LLM 前检查配置，缺 Key 时给出可操作的报错。"""
-    if not OPENAI_API_KEY:
+def check_llm_ready(settings=None) -> None:
+    """调用 LLM 前检查配置，缺 Key 时给出可操作的报错。
+
+    以界面里保存的配置（agent.model_config）为准，没保存过才看本模块的环境变量。
+    延迟导入：model_config 反过来要用本模块的默认值，放在文件顶部会形成循环导入。
+    已经取到 settings 的调用方可以直接传进来，省掉一次重复读文件。
+    """
+    if settings is None:
+        from . import model_config
+
+        settings = model_config.current()
+    if not settings.api_key:
         raise RuntimeError(
-            "未配置 OPENAI_API_KEY。请先设置环境变量，例如：\n"
+            "未配置 OPENAI_API_KEY。可以在工作台侧栏的「模型设置」里填写，或设置环境变量：\n"
             '  $env:OPENAI_API_KEY="sk-..."\n'
             '  $env:OPENAI_BASE_URL="https://api.deepseek.com"  # 非官方服务时\n'
             '  $env:MODEL_NAME="deepseek-chat"'

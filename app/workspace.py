@@ -11,6 +11,7 @@ import json
 import streamlit as st
 
 from agent import conversation
+from agent import model_config
 from agent import sessions as sessions_mod
 from app import chat_ui, map_view, sessions_ui, theme_watch, ui
 
@@ -86,54 +87,59 @@ def run_analysis(question: str, sid: str) -> dict:
     live_paths, shown, updates = [], set(visible), 0
     steps, records, paths = [], [], []
     answer, error, got_answer = "", None, False
-    with st.chat_message("assistant", avatar=chat_ui.ASSISTANT_AVATAR):
-        status = st.status("正在理解问题…", expanded=False)
-        done = st.empty()
-        finished = []
-        try:
-            for event in react.stream(question, session_id=sid):
-                if event["type"] == "thinking":
-                    status.update(label="正在整理分析…", state="running")
-                elif event["type"] == "tool_start":
-                    label = chat_ui.tool_label(event["name"])
-                    args_text = ", ".join(f"{k}={v!r}" for k, v in event["args"].items())
-                    steps.append(f"{event['name']}({args_text})")
-                    status.update(label=f"正在{label}…", state="running")
-                    with status:
-                        st.caption(label + (" · 已阻止重复执行" if event.get("blocked") else ""))
-                        st.code(json.dumps(event["args"], ensure_ascii=False, indent=2), language="json")
-                    finished.append(chat_ui.step_detail(event["name"], event["args"]))
-                elif event["type"] == "tool_end":
-                    with status:
-                        st.text(event["output"][:1200])
-                    done.caption("\n\n".join(f"✓ {line}" for line in finished))
-                    if event.get("geojson_path"):
-                        live_paths.append(event["geojson_path"])
-                elif event["type"] == "map_ready":
-                    live_paths = list(event["paths"])
-                elif event["type"] == "answer":
-                    result = event["result"]
-                    answer = result.answer or result.error or "本轮没有生成回答，请重新提问。"
-                    error = result.error or (None if result.answer else "本轮未返回有效回答")
-                    paths = result.geojson_paths
-                    records = getattr(result, "tool_records", [])
-                    got_answer = True
-                if event["type"] in ("tool_end", "map_ready") and live_paths:
-                    live = map_view.build(turn_paths + [(next_turn, list(dict.fromkeys(live_paths)))])
-                    shown |= {layer.id for layer in live.layers if layer.turn == next_turn}
-                    updates += 1
-                    map_view.render_map(live, shown, mode, slot=live_slot, key=f"workspace_map_live_{updates}")
-        except Exception as exc:
-            error = f"分析中断：{type(exc).__name__}: {exc}"
-            answer = "本轮分析未完成。请稍后重试，或缩小查询范围。"
-        if not got_answer and not error:
-            error = "分析结束但没有返回最终回答"
-            answer = "本轮没有生成完整回答，请重新提问。"
-        # 已经产出、并且刚刚画到地图上的文件仍然属于本轮：工具成功之后才失败时，
-        # 不能让用户刚看到的图层随回答一起消失，也不能让下载列表里查无此文件。
-        paths = paths or list(dict.fromkeys(live_paths))
-        status.update(label="分析未完成" if error else "分析完成", state="error" if error else "complete")
-        st.markdown(chat_ui.fix_cjk_bold(answer))
+    # 本轮冻结配置与密钥：react.stream 内嵌套的那次 frozen() 会复用这一份（active()），
+    # 下面兜底的错误文本也用它脱敏——不能等出错时再读，那时可能已经是别的标签页刚存的 Key。
+    with model_config.frozen() as (_, secrets):
+        with st.chat_message("assistant", avatar=chat_ui.ASSISTANT_AVATAR):
+            status = st.status("正在理解问题…", expanded=False)
+            done = st.empty()
+            finished = []
+            try:
+                for event in react.stream(question, session_id=sid):
+                    if event["type"] == "thinking":
+                        status.update(label="正在整理分析…", state="running")
+                    elif event["type"] == "tool_start":
+                        label = chat_ui.tool_label(event["name"])
+                        args_text = ", ".join(f"{k}={v!r}" for k, v in event["args"].items())
+                        steps.append(f"{event['name']}({args_text})")
+                        status.update(label=f"正在{label}…", state="running")
+                        with status:
+                            st.caption(label + (" · 已阻止重复执行" if event.get("blocked") else ""))
+                            st.code(json.dumps(event["args"], ensure_ascii=False, indent=2), language="json")
+                        finished.append(chat_ui.step_detail(event["name"], event["args"]))
+                    elif event["type"] == "tool_end":
+                        with status:
+                            st.text(event["output"][:1200])
+                        done.caption("\n\n".join(f"✓ {line}" for line in finished))
+                        if event.get("geojson_path"):
+                            live_paths.append(event["geojson_path"])
+                    elif event["type"] == "map_ready":
+                        live_paths = list(event["paths"])
+                    elif event["type"] == "answer":
+                        result = event["result"]
+                        answer = result.answer or result.error or "本轮没有生成回答，请重新提问。"
+                        error = result.error or (None if result.answer else "本轮未返回有效回答")
+                        paths = result.geojson_paths
+                        records = getattr(result, "tool_records", [])
+                        got_answer = True
+                    if event["type"] in ("tool_end", "map_ready") and live_paths:
+                        live = map_view.build(turn_paths + [(next_turn, list(dict.fromkeys(live_paths)))])
+                        shown |= {layer.id for layer in live.layers if layer.turn == next_turn}
+                        updates += 1
+                        map_view.render_map(live, shown, mode, slot=live_slot,
+                                            key=f"workspace_map_live_{updates}")
+            except Exception as exc:
+                # 这个字符串会显示在对话里、还要写进会话库：用本轮冻结的密钥脱敏
+                error = model_config.redact(f"分析中断：{type(exc).__name__}: {exc}", secrets)
+                answer = "本轮分析未完成。请稍后重试，或缩小查询范围。"
+            if not got_answer and not error:
+                error = "分析结束但没有返回最终回答"
+                answer = "本轮没有生成完整回答，请重新提问。"
+            # 已经产出、并且刚刚画到地图上的文件仍然属于本轮：工具成功之后才失败时，
+            # 不能让用户刚看到的图层随回答一起消失，也不能让下载列表里查无此文件。
+            paths = paths or list(dict.fromkeys(live_paths))
+            status.update(label="分析未完成" if error else "分析完成", state="error" if error else "complete")
+            st.markdown(chat_ui.fix_cjk_bold(answer))
     return {"role": "assistant", "content": answer, "steps": steps, "geojson": paths,
             "tool_records": records, "error": error}
 

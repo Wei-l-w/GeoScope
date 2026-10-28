@@ -6,13 +6,14 @@
 
 from __future__ import annotations
 
+from contextvars import copy_context
 from copy import deepcopy
 from dataclasses import dataclass, field
 import re
 
 from langchain_core.messages import ToolMessage
 
-from . import artifacts, conversation, sessions
+from . import artifacts, conversation, model_config, sessions
 from .geosql import _get_llm
 from .tools import ALL_TOOLS
 
@@ -105,124 +106,153 @@ def stream(question: str, history: list[tuple[str, str]] | None = None,
         {"type": "tool_start", "name": ..., "args": ...} 开始调用工具
         {"type": "tool_end",   "name": ..., "output": ...} 工具返回
         {"type": "answer", "result": AgentResult}         最终回答（最后一个事件）
-    """
-    result = AgentResult(question=question)
-    try:
-        restored = _restore_map(question, session_id)
-        if restored:
-            result.geojson_paths = restored
-            result.answer = f"已重新加载本会话实际生成的地图，共 {len(restored)} 个文件，请查看右侧地图。"
-            yield {"type": "map_ready", "paths": restored}
-            yield {"type": "answer", "result": result}
-            return
-        messages = [("system", SYSTEM_PROMPT)]
-        messages.extend(conversation.context_messages(question, history, session_id))
-    except Exception as e:
-        result.error = f"会话记忆加载失败：{type(e).__name__}: {e}"
-        result.answer = result.error
-        yield {"type": "answer", "result": result}
-        return
-    try:
-        llm = _get_llm().bind_tools(ALL_TOOLS)
-    except Exception as e:
-        result.error = f"LLM 初始化失败：{type(e).__name__}: {e}"
-        result.answer = result.error
-        yield {"type": "answer", "result": result}
-        return
-    tool_map = {t.name: t for t in ALL_TOOLS}
 
-    # 工具序列跨 LLM 轮次累计；被阻断的重复请求不会重置计数。
-    consecutive = 0
-    last_tool = None
-    map_corrections = 0
-    for step in range(1, MAX_STEPS + 1):
-        yield {"type": "thinking", "step": step}
+    每次推进都在同一份拷贝上下文里执行：本轮冻结的配置对生成器内部可见，
+    但 yield 出去时调用方仍处在自己的上下文里。ContextVar 是按上下文隔离的，
+    不是按生成器隔离的——直接在生成器体里 with frozen() 的话，暂停期间调用方
+    会一直看到冻结值，而且 close 时的 token.reset 可能发生在另一个上下文。
+    """
+    inner = _stream_run(question, history, session_id)
+    context = copy_context()
+    try:
+        while True:
+            try:
+                event = context.run(next, inner)
+            except StopIteration:  # 生成器正常结束
+                return
+            yield event
+    finally:
+        # close 也在这份上下文里：token 的 reset 必须发生在设置它的那个上下文
+        context.run(inner.close)
+
+
+def _stream_run(question: str, history: list[tuple[str, str]] | None,
+                session_id: str | None):
+    """真实的流式主体；只由 stream() 在专属上下文里驱动。"""
+    result = AgentResult(question=question)
+    # 整轮冻结配置与密钥：区间内 current()/active() 都拿到同一份，嵌套的 geosql.ask
+    # （query_database 工具）不会中途换成别的标签页刚保存的模型；退出时 reset，下一轮重读。
+    with model_config.frozen() as (settings, secrets):
         try:
-            ai = llm.invoke(messages)
+            restored = _restore_map(question, session_id)
+            if restored:
+                result.geojson_paths = restored
+                result.answer = f"已重新加载本会话实际生成的地图，共 {len(restored)} 个文件，请查看右侧地图。"
+                yield {"type": "map_ready", "paths": restored}
+                yield {"type": "answer", "result": result}
+                return
+            messages = [("system", SYSTEM_PROMPT)]
+            messages.extend(conversation.context_messages(question, history, session_id))
         except Exception as e:
-            # LLM 网络异常（超时/限流/代理抖动）：转成友好结果而非抛堆栈
-            result.error = f"LLM 请求失败：{type(e).__name__}: {e}。通常是代理延迟或限流，稍后重试即可。"
+            result.error = model_config.redact(f"会话记忆加载失败：{type(e).__name__}: {e}", secrets)
             result.answer = result.error
             yield {"type": "answer", "result": result}
             return
-        messages.append(ai)
-
-        if not ai.tool_calls:
-            answer = str(ai.content or "")
-            # 历史内部标记被模型照抄时只保留面向用户的回答；不信任其伪造的工具记录。
-            answer = conversation.clean_assistant_text(answer)
-            claims_file = bool(re.search(r"[^\s`\"<>]+\.geojson", answer, re.I))
-            needs_artifact = _map_requested(question) and not result.geojson_paths
-            if needs_artifact and (claims_file or not _asks_parameters(answer)):
-                if map_corrections == 0:
-                    map_corrections += 1
-                    messages.append(("human", "执行校验未通过：本机没有产生可验证的地图文件。"
-                                     "请实际调用 geocode/buffer_analysis/ship_track/query_database 等工具，"
-                                     "不能在文本中模拟工具、编造路径或沿用未经执行的历史数字。"
-                                     "缺少参数则明确询问；工具确实失败则如实说明。"))
-                    continue
-                result.error = "地图未生成：模型未通过本地工具产物校验"
-                result.answer = "本轮没有生成可显示的地图。尚未得到本地空间工具的有效产物，因此不能确认文件、坐标或事件数量。请明确地点与半径，或船号与时间范围后重试。"
-                yield {"type": "answer", "result": result}
-                return
-            result.answer = answer
-            if not result.answer or not str(result.answer).strip():
-                result.error = "LLM 未返回有效回答"
-                result.answer = result.error
+        try:
+            llm = _get_llm(settings=settings).bind_tools(ALL_TOOLS)
+        except Exception as e:
+            result.error = model_config.redact(f"LLM 初始化失败：{type(e).__name__}: {e}", secrets)
+            result.answer = result.error
             yield {"type": "answer", "result": result}
             return
+        tool_map = {t.name: t for t in ALL_TOOLS}
 
-        for call in ai.tool_calls:
-            name, args = call["name"], call["args"]
-            consecutive = consecutive + 1 if name == last_tool else 1
-            last_tool = name
-            blocked = consecutive > MAX_CONSECUTIVE_TOOL_CALLS
-            yield {"type": "tool_start", "name": name, "args": args, "step": step, "blocked": blocked}
-            result.steps.append(f"{name}({args})" + (" [已阻断重复调用]" if blocked else ""))
-            if blocked:
-                succeeded = False
-                output = (
-                    f"已阻断重复调用：同一工具 {name} 最多连续执行 {MAX_CONSECUTIVE_TOOL_CALLS} 次，"
-                    "本次未执行。请整合已有信息直接回答，或改用其他工具；"
-                    "信息不足时请如实说明。"
-                )
-            else:
-                try:
-                    output = tool_map[name].invoke(args)
-                    succeeded = True
-                except Exception as e:
-                    output = f"工具执行异常：{e}"
-                    succeeded = False
-            output = str(output)
-            if output.startswith(("查询失败", "知识库检索失败", "工具执行异常", "参数非法",
-                                  "不支持的表", "未找到", "地理编码服务不可用", "知识库中未找到")):
-                succeeded = False
-            ev = {"type": "tool_end", "name": name, "output": output, "blocked": blocked}
-            path = artifacts.extract_tool_path(output) if succeeded else None
-            if path:
-                try:
-                    path = artifacts.validated_path(path)
-                    if path not in result.geojson_paths:
-                        result.geojson_paths.append(path)
-                    ev["geojson_path"] = path
-                except artifacts.ArtifactError as exc:
-                    succeeded = False
-                    output += f"\n地图产物校验失败：{exc}"
-                    ev["output"] = output
-                    ev["artifact_error"] = str(exc)
-                    path = None
-            record = {"name": name, "args": deepcopy(args), "output": output,
-                      "success": succeeded, "blocked": blocked}
-            if path:
-                record["geojson_path"] = path
-            result.tool_records.append(record)
-            yield ev
-            # 每个 tool_call 都必须有对应回复，包括被阻断的调用；不得提前跳出。
-            messages.append(ToolMessage(content=output, tool_call_id=call["id"]))
+        # 工具序列跨 LLM 轮次累计；被阻断的重复请求不会重置计数。
+        consecutive = 0
+        last_tool = None
+        map_corrections = 0
+        for step in range(1, MAX_STEPS + 1):
+            yield {"type": "thinking", "step": step}
+            try:
+                ai = llm.invoke(messages)
+            except Exception as e:
+                # LLM 网络异常（超时/限流/代理抖动）：转成友好结果而非抛堆栈
+                result.error = model_config.redact(
+                    f"LLM 请求失败：{type(e).__name__}: {e}。通常是代理延迟或限流，稍后重试即可。", secrets)
+                result.answer = result.error
+                yield {"type": "answer", "result": result}
+                return
+            messages.append(ai)
 
-    result.error = f"达到最大步数 {MAX_STEPS} 仍未收敛"
-    result.answer = ai.content or result.error
-    yield {"type": "answer", "result": result}
+            if not ai.tool_calls:
+                answer = str(ai.content or "")
+                # 历史内部标记被模型照抄时只保留面向用户的回答；不信任其伪造的工具记录。
+                answer = conversation.clean_assistant_text(answer)
+                claims_file = bool(re.search(r"[^\s`\"<>]+\.geojson", answer, re.I))
+                needs_artifact = _map_requested(question) and not result.geojson_paths
+                if needs_artifact and (claims_file or not _asks_parameters(answer)):
+                    if map_corrections == 0:
+                        map_corrections += 1
+                        messages.append(("human", "执行校验未通过：本机没有产生可验证的地图文件。"
+                                         "请实际调用 geocode/buffer_analysis/ship_track/query_database 等工具，"
+                                         "不能在文本中模拟工具、编造路径或沿用未经执行的历史数字。"
+                                         "缺少参数则明确询问；工具确实失败则如实说明。"))
+                        continue
+                    result.error = "地图未生成：模型未通过本地工具产物校验"
+                    result.answer = "本轮没有生成可显示的地图。尚未得到本地空间工具的有效产物，因此不能确认文件、坐标或事件数量。请明确地点与半径，或船号与时间范围后重试。"
+                    yield {"type": "answer", "result": result}
+                    return
+                result.answer = answer
+                if not result.answer or not str(result.answer).strip():
+                    result.error = "LLM 未返回有效回答"
+                    result.answer = result.error
+                yield {"type": "answer", "result": result}
+                return
+
+            for call in ai.tool_calls:
+                name, args = call["name"], call["args"]
+                consecutive = consecutive + 1 if name == last_tool else 1
+                last_tool = name
+                blocked = consecutive > MAX_CONSECUTIVE_TOOL_CALLS
+                yield {"type": "tool_start", "name": name, "args": args, "step": step, "blocked": blocked}
+                result.steps.append(f"{name}({args})" + (" [已阻断重复调用]" if blocked else ""))
+                if blocked:
+                    succeeded = False
+                    output = (
+                        f"已阻断重复调用：同一工具 {name} 最多连续执行 {MAX_CONSECUTIVE_TOOL_CALLS} 次，"
+                        "本次未执行。请整合已有信息直接回答，或改用其他工具；"
+                        "信息不足时请如实说明。"
+                    )
+                else:
+                    try:
+                        output = tool_map[name].invoke(args)
+                        succeeded = True
+                    except Exception as e:
+                        output = f"工具执行异常：{e}"
+                        succeeded = False
+                # 工具自己捕获异常后返回的错误文本（如"查询失败：…"）同样会原样展示、
+                # 写进会话库、再喂给模型：所有出口共用一个脱敏点，只抹密钥，报错本身保留。
+                output = model_config.redact(str(output), secrets)
+                if output.startswith(("查询失败", "知识库检索失败", "工具执行异常", "参数非法",
+                                      "不支持的表", "未找到", "地理编码服务不可用", "知识库中未找到")):
+                    succeeded = False
+                ev = {"type": "tool_end", "name": name, "output": output, "blocked": blocked}
+                path = artifacts.extract_tool_path(output) if succeeded else None
+                if path:
+                    try:
+                        path = artifacts.validated_path(path)
+                        if path not in result.geojson_paths:
+                            result.geojson_paths.append(path)
+                        ev["geojson_path"] = path
+                    except artifacts.ArtifactError as exc:
+                        succeeded = False
+                        detail = model_config.redact(str(exc), secrets)
+                        output += f"\n地图产物校验失败：{detail}"
+                        ev["output"] = output
+                        ev["artifact_error"] = detail
+                        path = None
+                record = {"name": name, "args": deepcopy(args), "output": output,
+                          "success": succeeded, "blocked": blocked}
+                if path:
+                    record["geojson_path"] = path
+                result.tool_records.append(record)
+                yield ev
+                # 每个 tool_call 都必须有对应回复，包括被阻断的调用；不得提前跳出。
+                messages.append(ToolMessage(content=output, tool_call_id=call["id"]))
+
+        result.error = f"达到最大步数 {MAX_STEPS} 仍未收敛"
+        result.answer = ai.content or result.error
+        yield {"type": "answer", "result": result}
 
 
 def run(question: str, verbose: bool = True, history: list[tuple[str, str]] | None = None,
