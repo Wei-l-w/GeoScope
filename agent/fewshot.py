@@ -16,18 +16,22 @@ EXAMPLES = [
         "sql": """SELECT event_date, event_type, sub_event_type, location, fatalities, risk_level
 FROM acled_events
 WHERE lat BETWEEN 12 AND 20 AND lon BETWEEN 38 AND 46
-  AND event_date >= CURRENT_DATE - INTERVAL 30 DAY
+  AND event_date >= (SELECT MAX(event_date) FROM acled_events) - INTERVAL 30 DAY  -- 历史数据：以表内最新日期为基准
 ORDER BY event_date DESC""",
         "keywords": ["红海", "冲突", "事件", "区域", "范围"],
     },
     {
         "q": "霍尔木兹海峡（26.5N, 56.3E）100 公里范围内有哪些高风险事件？",
-        "sql": """SELECT event_date, event_type, location, risk_level, chokepoint,
-       111.32 * SQRT(POW(lat - 26.5, 2) + POW((lon - 56.3) * COS(RADIANS(26.5)), 2)) AS dist_km
-FROM acled_events
-WHERE lat BETWEEN 25.6 AND 27.4 AND lon BETWEEN 55.4 AND 57.2
-HAVING dist_km <= 100
-ORDER BY dist_km""",
+        "sql": """SELECT event_date, event_type, location, risk_level, chokepoint, dist_km
+FROM (
+    SELECT event_id, event_date, event_type, location, risk_level, chokepoint,
+           111.32 * SQRT(POW(lat - 26.5, 2) + POW((lon - 56.3) * COS(RADIANS(26.5)), 2)) AS dist_km
+    FROM acled_events
+    WHERE lat BETWEEN 25.6 AND 27.4 AND lon BETWEEN 55.4 AND 57.2  -- 先用矩形框粗筛
+      AND risk_level >= 4
+) t
+WHERE dist_km <= 100  -- 别名只能在外层过滤：没有 GROUP BY 时不能用 HAVING
+ORDER BY dist_km, event_id""",
         "keywords": ["公里", "范围", "附近", "距离", "霍尔木兹", "海峡"],
     },
     {
@@ -45,7 +49,7 @@ ORDER BY event_cnt DESC""",
         "sql": """SELECT ts, lat, lon, sog, cog
 FROM ais_positions
 WHERE mmsi = 477123456
-  AND ts >= CURRENT_TIMESTAMP - INTERVAL 7 DAY
+  AND ts >= (SELECT MAX(ts) FROM ais_positions) - INTERVAL 7 DAY
 ORDER BY ts""",
         "keywords": ["航迹", "轨迹", "船", "mmsi", "AIS"],
     },
@@ -55,7 +59,7 @@ ORDER BY ts""",
 FROM ais_positions p
 JOIN ais_ships s USING (mmsi)
 WHERE p.lat BETWEEN 29 AND 32 AND p.lon BETWEEN 32 AND 33.5
-  AND p.ts >= CURRENT_TIMESTAMP - INTERVAL 30 DAY
+  AND p.ts >= (SELECT MAX(ts) FROM ais_positions) - INTERVAL 30 DAY
   AND s.ship_type = '油轮'""",
         "keywords": ["油轮", "苏伊士", "运河", "多少艘", "经过", "区域"],
     },

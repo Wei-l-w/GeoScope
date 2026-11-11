@@ -9,6 +9,7 @@ from __future__ import annotations
 from contextvars import copy_context
 from copy import deepcopy
 from dataclasses import dataclass, field
+import json
 import re
 
 from langchain_core.messages import ToolMessage
@@ -19,6 +20,18 @@ from .tools import ALL_TOOLS
 
 MAX_STEPS = 8
 MAX_CONSECUTIVE_TOOL_CALLS = 2
+# 逐个地点/船号执行的工具：比较三个海峡要连着 geocode 三次、buffer_analysis 三次，
+# 按工具名限 2 次会把正常的多地点问题拦掉。参数完全相同的重复仍按 2 次阻断。
+PER_TARGET_TOOLS = frozenset({"geocode", "buffer_analysis", "ship_track"})
+MAX_CONSECUTIVE_TARGET_CALLS = 5
+
+
+def _tool_limit(name: str) -> int:
+    return MAX_CONSECUTIVE_TARGET_CALLS if name in PER_TARGET_TOOLS else MAX_CONSECUTIVE_TOOL_CALLS
+
+
+def _call_signature(name: str, args) -> tuple[str, str]:
+    return name, json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
 
 SYSTEM_PROMPT = """你是 GeoAgent，一个空间分析智能体。你可以调用以下工具完成任务：
 - geocode：地名 -> 经纬度（涉及地名时必须先调用，禁止凭印象猜坐标）
@@ -158,8 +171,8 @@ def _stream_run(question: str, history: list[tuple[str, str]] | None,
         tool_map = {t.name: t for t in ALL_TOOLS}
 
         # 工具序列跨 LLM 轮次累计；被阻断的重复请求不会重置计数。
-        consecutive = 0
-        last_tool = None
+        consecutive = same_args = 0
+        last_tool = last_signature = None
         map_corrections = 0
         for step in range(1, MAX_STEPS + 1):
             yield {"type": "thinking", "step": step}
@@ -201,16 +214,20 @@ def _stream_run(question: str, history: list[tuple[str, str]] | None,
 
             for call in ai.tool_calls:
                 name, args = call["name"], call["args"]
+                signature = _call_signature(name, args)
                 consecutive = consecutive + 1 if name == last_tool else 1
-                last_tool = name
-                blocked = consecutive > MAX_CONSECUTIVE_TOOL_CALLS
+                same_args = same_args + 1 if signature == last_signature else 1
+                last_tool, last_signature = name, signature
+                limit = _tool_limit(name)
+                blocked = consecutive > limit or same_args > MAX_CONSECUTIVE_TOOL_CALLS
                 yield {"type": "tool_start", "name": name, "args": args, "step": step, "blocked": blocked}
                 result.steps.append(f"{name}({args})" + (" [已阻断重复调用]" if blocked else ""))
                 if blocked:
                     succeeded = False
                     output = (
-                        f"已阻断重复调用：同一工具 {name} 最多连续执行 {MAX_CONSECUTIVE_TOOL_CALLS} 次，"
-                        "本次未执行。请整合已有信息直接回答，或改用其他工具；"
+                        f"已阻断重复调用：同一工具 {name} 最多连续执行 {limit} 次"
+                        f"（参数完全相同的最多 {MAX_CONSECUTIVE_TOOL_CALLS} 次），本次未执行。"
+                        "请整合已有信息直接回答，或改用其他工具；"
                         "信息不足时请如实说明。"
                     )
                 else:

@@ -137,7 +137,8 @@ def _apply_fields(state, values, seq, origin, detail=""):
 def _explicit_text(state, text, seq, origin="user", record_query=True):
     """只识别常见且明确的写法；未知筛选保留原文，不猜测地理或日期。"""
     text = str(text)
-    if re.search(r"重新开始|重置(?:全部|所有)?(?:分析|条件|记忆)?|清空(?:全部|所有)?(?:分析条件|条件|记忆)", text):
+    # "重置"必须带宾语：单独一个"重置"多半在说别的东西（"地图视野怎么重置"），不能清掉整个会话的上下文。
+    if re.search(r"重新开始|重置(?:全部|所有)?(?:的)?(?:分析|条件|记忆)|清空(?:全部|所有)?(?:的)?(?:分析条件|条件|记忆)", text):
         state.clear()
         state["sources"] = {}
         _put(state, "reset_at_seq", seq, seq, origin, text)

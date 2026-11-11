@@ -1,11 +1,12 @@
 """查询保护的行为回归：只用内存 DuckDB 和模型替身。"""
 
+import re
 from types import SimpleNamespace
 
 import duckdb
 import pytest
 
-from agent import db, fewshot, geosql, sql_guard
+from agent import config, db, fewshot, geosql, sql_guard
 
 
 @pytest.fixture
@@ -110,3 +111,27 @@ def test_tool_discloses_truncated_results(monkeypatch):
     monkeypatch.setattr(geosql, "ask", lambda *args, **kwargs: geosql.GeoSQLResult(
         question="测试", columns=["n"], rows=[(1,)], truncated=True))
     assert "不是全部记录" in query_database.invoke({"question": "列出全部"})
+
+
+@pytest.fixture
+def empty_warehouse():
+    """按 db/schema.sql 建的空仓库：只验证例题能通过绑定和执行，不关心结果行。"""
+    schema = (config.ROOT / "db" / "schema.sql").read_text(encoding="utf-8")
+    with duckdb.connect() as con:
+        con.execute(schema)
+        yield con
+
+
+@pytest.mark.parametrize("example", [ex for ex in fewshot.EXAMPLES if not ex.get("needs_spatial")],
+                         ids=lambda item: item["q"][:20])
+def test_fewshot_examples_execute(example, empty_warehouse):
+    """模型照抄例题；例题本身报错（如没有 GROUP BY 却用 HAVING）会让同类问题首轮必败。"""
+    sql = example["sql"].replace("<事件ID>", "x")
+    columns, _, _ = sql_guard.execute_query(empty_warehouse, sql)
+    assert columns
+
+
+@pytest.mark.parametrize("example", fewshot.EXAMPLES, ids=lambda item: item["q"][:20])
+def test_fewshot_examples_do_not_anchor_on_wall_clock(example):
+    """仓库是历史数据：以今天为基准的"最近 N 天"永远查不到，应以表内最新时间为基准。"""
+    assert not re.search(r"current_date|current_timestamp|\bnow\s*\(|\btoday\s*\(", example["sql"], re.I)

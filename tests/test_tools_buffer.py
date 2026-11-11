@@ -64,3 +64,17 @@ def test_missing_or_blank_types_are_counted_as_unknown(warehouse):
 def test_an_empty_buffer_has_no_breakdown(warehouse):
     warehouse([])
     assert "圈内共 0 条记录（acled_events）。GeoJSON 已保存：" in _run()
+
+
+def test_truncated_query_points_keep_a_parseable_path(monkeypatch):
+    """点数超过上图上限时的提示不能接在路径那一行，否则路径被解析成"…geojson（仅前…）"。"""
+    from agent.geosql import GeoSQLResult
+
+    monkeypatch.setattr(tools, "_MAX_GEO_POINTS", 2)
+    result = GeoSQLResult("q", columns=["lat", "lon", "name"],
+                          rows=[(12.0 + i, 43.0, f"p{i}") for i in range(3)])
+    note = tools._rows_to_geojson(result)
+    assert "仅前 2 个点上图" in note
+    path = artifacts.extract_tool_path(note)
+    assert path.endswith(".geojson")
+    assert artifacts.validated_path(path) == path
