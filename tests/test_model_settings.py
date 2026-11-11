@@ -978,7 +978,9 @@ def _trigger_labels(app):
 
 def test_sidebar_shows_current_model_and_prefills_the_form(settings_file, env_defaults, tmp_path, monkeypatch):
     app = _workspace(tmp_path, monkeypatch)
-    assert app.text_input(key="model_api_key").value == "sk-env"
+    # Key 不能预填：控件值会原样发到浏览器，密码框只是掩码
+    assert app.text_input(key="model_api_key").value == ""
+    assert "sk-env" not in (app.text_input(key="model_api_key").placeholder or "")
     assert app.text_input(key="model_model").value == "env-model"
     assert app.text_input(key="model_base_url").value == "https://env.example/v1"
     assert [label for label in _trigger_labels(app) if "模型 ·" in label] == ["模型 · env-model（.env）"]
@@ -1066,3 +1068,42 @@ def test_reset_failure_is_reported_instead_of_silently_ignored(
     assert not app.exception
     assert any("没能删掉" in error.value for error in app.error)
     assert app.text_input(key="model_model").value == "file-model"  # 输入框没被清空，还能再试
+
+
+def test_saved_key_is_never_sent_to_the_browser(settings_file, env_defaults, tmp_path, monkeypatch):
+    model_config.save("https://relay.example/v1", "sk-file-secret-0042", "file-model")
+    app = _workspace(tmp_path, monkeypatch)
+    field = app.text_input(key="model_api_key")
+    assert field.value == ""
+    assert field.placeholder == "已配置（…0042），留空保持不变"
+    assert "sk-file-secret" not in field.placeholder
+
+
+def test_blank_key_keeps_the_current_key(settings_file, env_defaults, tmp_path, monkeypatch, fake_llm):
+    app = _workspace(tmp_path, monkeypatch)
+    _fill(app, "https://env.example/v1", "", "new-model")
+    _submit(app)
+    assert not app.exception
+    assert fake_llm.calls[0]["api_key"] == "sk-env"
+    assert model_config.current() == model_config.ModelSettings(
+        "https://env.example/v1", "sk-env", "new-model", "file")
+
+
+def test_changing_base_url_requires_retyping_the_key(settings_file, env_defaults, tmp_path, monkeypatch, fake_llm):
+    """留空沿用 Key 只限同一地址：否则谁都能把地址改成自己的服务器，让试连把 Key 送过去。"""
+    app = _workspace(tmp_path, monkeypatch)
+    _fill(app, "https://attacker.example/v1", "", "env-model")
+    _submit(app)
+    assert not app.exception
+    assert any("重新填写 API Key" in error.value for error in app.error)
+    assert fake_llm.calls == []
+    assert not settings_file.exists()
+
+
+def test_typed_key_is_cleared_after_saving(settings_file, env_defaults, tmp_path, monkeypatch, fake_llm):
+    app = _workspace(tmp_path, monkeypatch)
+    _fill(app, "https://relay.example/v1", "sk-typed-key-7777", "file-model")
+    _submit(app)
+    assert not app.exception
+    assert app.text_input(key="model_api_key").value == ""
+    assert app.text_input(key="model_api_key").placeholder == "已配置（…7777），留空保持不变"

@@ -137,3 +137,42 @@ def test_llm_initialization_failure_returns_result(monkeypatch):
     monkeypatch.setattr(react, "_get_llm", fail)
     result = react.run("问题", verbose=False)
     assert result.error and "LLM 初始化失败" in result.error
+
+
+def place_turn(name, *places, prefix="geo"):
+    return AIMessage(content="", tool_calls=[
+        {"name": name, "args": {"place": place}, "id": f"{prefix}-{i}"} for i, place in enumerate(places)
+    ])
+
+
+def setup_place_tools(monkeypatch, answers):
+    tools = {name: FakeTool(name) for name in ("geocode", "buffer_analysis")}
+    llm = FakeLLM(answers)
+    monkeypatch.setattr(react, "ALL_TOOLS", list(tools.values()))
+    monkeypatch.setattr(react, "_get_llm", lambda settings=None: llm)
+    return llm, tools
+
+
+def test_three_places_are_all_geocoded(monkeypatch):
+    """比较三个海峡：连续三次 geocode 各查一个地点，不是重复调用。"""
+    _, tools = setup_place_tools(monkeypatch, [
+        place_turn("geocode", "霍尔木兹海峡", "曼德海峡", "苏伊士运河"), AIMessage(content="完成"),
+    ])
+    events = list(react.stream("比较霍尔木兹海峡、曼德海峡和苏伊士运河"))
+    assert [call["place"] for call in tools["geocode"].calls] == ["霍尔木兹海峡", "曼德海峡", "苏伊士运河"]
+    assert not any(event["blocked"] for event in events if event["type"] == "tool_end")
+
+
+def test_identical_place_calls_are_still_blocked(monkeypatch):
+    _, tools = setup_place_tools(monkeypatch, [
+        place_turn("geocode", "曼德海峡", "曼德海峡", "曼德海峡"), AIMessage(content="完成"),
+    ])
+    list(react.stream("曼德海峡在哪"))
+    assert len(tools["geocode"].calls) == 2
+
+
+def test_per_target_tools_still_have_a_cap(monkeypatch):
+    places = [f"地点{i}" for i in range(react.MAX_CONSECUTIVE_TARGET_CALLS + 2)]
+    _, tools = setup_place_tools(monkeypatch, [place_turn("geocode", *places), AIMessage(content="完成")])
+    list(react.stream("很多地点"))
+    assert len(tools["geocode"].calls) == react.MAX_CONSECUTIVE_TARGET_CALLS

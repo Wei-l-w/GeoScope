@@ -27,7 +27,10 @@ SYSTEM_PROMPT = """你是一个空间数据分析专家，负责把用户的自�
 5. 结果默认加 LIMIT 1000 防止全表返回（聚合统计除外）；
 6. 输出列严格限定为问题所要求的列（及其数值），不多不少：不要附加
    event_id、event_date 等未要求的列；带 ORDER BY 的 LIMIT 查询必须加
-   唯一列（如主键）作为第二排序键，保证结果确定。
+   唯一列（如主键）作为第二排序键，保证结果确定；
+7. 仓库是历史数据，"最近 N 天/一个月/一周"以对应表内的最新时间为基准，
+   如 ts >= (SELECT MAX(ts) FROM ais_positions) - INTERVAL 7 DAY；
+   不要用 CURRENT_DATE / CURRENT_TIMESTAMP / NOW()，否则结果永远为空。
 
 数据库结构：
 {schema}

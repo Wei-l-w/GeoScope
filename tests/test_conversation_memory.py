@@ -375,3 +375,21 @@ def test_out_of_order_replies_do_not_skip_later_summaries_after_cursor_advances(
     assert updated["summary"].count("第二轮答复") == 1
     assert updated["summary"].count("第一轮晚到答复") == 1
     assert build_memory(extended, updated, recent_turns=1) == updated
+
+
+def test_casual_reset_wording_keeps_the_analysis_state():
+    """"地图视野怎么重置"说的是地图，不能清空船号、天数和此前的上下文。"""
+    messages = [_user("MMSI 668116204 最近30天走了什么路线？", 1),
+                {"seq": 2, "role": "assistant", "content": "航迹如下"},
+                _user("地图视野怎么重置？", 3)]
+    state = build_memory(messages)["state"]
+    assert state["mmsi"] == 668116204 and state["days"] == 30
+    assert "reset_at_seq" not in state
+
+
+def test_explicit_reset_still_clears_the_state():
+    messages = [_user("MMSI 668116204 最近30天走了什么路线？", 1),
+                {"seq": 2, "role": "assistant", "content": "航迹如下"},
+                _user("重置分析条件", 3)]
+    state = build_memory(messages)["state"]
+    assert "mmsi" not in state and state["reset_at_seq"] == 3

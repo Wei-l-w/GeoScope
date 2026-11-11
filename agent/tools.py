@@ -269,10 +269,9 @@ def _rows_to_geojson(result) -> str | None:
     if not features:
         return None
     path = _save_geojson("query", {"type": "FeatureCollection", "features": features})
-    note = f"\nGeoJSON 已保存：{path}"
-    if len(result.rows) > _MAX_GEO_POINTS:
-        note += f"（仅前 {_MAX_GEO_POINTS} 个点上图）"
-    return note
+    # 路径必须独占最后一行：artifacts.extract_tool_path 把"GeoJSON 已保存："之后的整行当作路径。
+    note = f"\n仅前 {_MAX_GEO_POINTS} 个点上图。" if len(result.rows) > _MAX_GEO_POINTS else ""
+    return note + f"\nGeoJSON 已保存：{path}"
 
 
 @tool
